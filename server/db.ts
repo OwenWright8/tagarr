@@ -102,6 +102,17 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX activity_at ON activity (at DESC);
   `,
+  `
+  -- Keys for the read-only stats endpoint (Homepage's Custom API widget).
+  -- Only a hash is stored: the key is shown once, when it's created.
+  CREATE TABLE widget_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  `,
 ];
 
 export function openDb(file: string): DB {

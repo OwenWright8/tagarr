@@ -1,10 +1,10 @@
-# Autotagarr: automatic per-person tags for a shared Jellyfin library.
+# Tagarr: automatic per-person tags for a shared Jellyfin library.
 #
 #     docker compose up -d
 #
 # then open http://<this-machine>:8686, create your account and connect
 # Jellyfin and Seerr in the setup wizard. There is nothing to configure here:
-# everything lives in the `autotagarr-data` volume (back it up).
+# everything lives in the `tagarr-data` volume (back it up).
 #
 # Running Jellyfin and Seerr in the same compose project? Use their service
 # names in the wizard (e.g. http://jellyfin:8096). Otherwise use a LAN IP.
@@ -17,20 +17,20 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-  autotagarr:
+  tagarr:
     # `docker compose up -d` pulls the prebuilt image; `docker compose up -d
     # --build` builds it from this folder instead.
-    image: ${AUTOTAGARR_IMAGE_REPO:-ghcr.io/owenwright8/autotagarr}:${AUTOTAGARR_VERSION:-latest}
+    image: ${TAGARR_IMAGE_REPO:-ghcr.io/owenwright8/tagarr}:${TAGARR_VERSION:-latest}
     build:
       context: .
-    container_name: autotagarr
+    container_name: tagarr
     restart: unless-stopped
     environment:
       # "off" stops the app from checking GitHub for new releases.
       UPDATE_CHECK: ${UPDATE_CHECK:-on}
       TZ: ${TZ:-UTC}
     volumes:
-      - autotagarr-data:/data
+      - tagarr-data:/data
     logging: *default-logging
     security_opt:
       - no-new-privileges:true
@@ -41,4 +41,4 @@ services:
       - "${APP_PORT:-8686}:8686"
 
 volumes:
-  autotagarr-data:
+  tagarr-data:

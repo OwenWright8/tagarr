@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Info, KeyRound, Library as LibraryIcon, Plug, RefreshCw, Users, Wand2, Webhook } from "lucide-react";
+import { Check, Copy, Info, KeyRound, LayoutDashboard, Library as LibraryIcon, Plug, RefreshCw, Trash2, Users, Wand2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { api, get, type About, type Library, type SettingsData } from "@/lib/api";
 import { PageHeader } from "@/components/Layout";
 import { ConnectionForm } from "@/components/ConnectionForm";
 import { PeopleEditor } from "@/components/PeopleEditor";
 import { PersonChip, usePeople } from "@/components/people";
-import { Button, Card, CardBody, CardHeader, Field, Input, PageSpinner, Switch, cn } from "@/components/ui";
+import { Button, Card, CardBody, CardHeader, Field, Input, Modal, PageSpinner, Switch, cn, timeAgo } from "@/components/ui";
 
 export default function SettingsPage() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => get<SettingsData>("/settings") });
@@ -26,7 +26,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" />
       <div className="space-y-6">
         <Card id="connections" className="scroll-mt-20">
-          <CardHeader icon={<Plug className="h-5 w-5" />} title="Connections" description="Where Autotagarr finds Jellyfin and Seerr. Keys are stored on this server and never sent to the browser." />
+          <CardHeader icon={<Plug className="h-5 w-5" />} title="Connections" description="Where Tagarr finds Jellyfin and Seerr. Keys are stored on this server and never sent to the browser." />
           <CardBody className="grid gap-8 lg:grid-cols-2">
             <div>
               <h3 className="mb-3 text-sm font-semibold">Jellyfin</h3>
@@ -55,6 +55,7 @@ export default function SettingsPage() {
 
         <AutomationCard s={s} />
         <LibrariesCard s={s} />
+        <WidgetCard />
         <AccountCard username={s.adminUsername} />
         <AboutCard />
       </div>
@@ -104,7 +105,7 @@ export function WebhookHelp({ path, rotatable }: { path: string; rotatable?: boo
       </div>
       <p className="flex gap-1.5 text-xs text-muted-foreground">
         <Info className="mt-px h-3.5 w-3.5 shrink-0" />
-        If Seerr reaches Autotagarr by another address (e.g. http://autotagarr:8686 on the same Docker network), use that host with the same path. The Jellyfin Webhook
+        If Seerr reaches Tagarr by another address (e.g. http://tagarr:8686 on the same Docker network), use that host with the same path. The Jellyfin Webhook
         plugin can call it too, on “Item Added”.
       </p>
       {rotatable && (
@@ -216,7 +217,7 @@ function LibrariesCard({ s }: { s: SettingsData }) {
   const dirty = JSON.stringify([...chosen].sort()) !== JSON.stringify([...s.libraries].sort());
   return (
     <Card id="libraries" className="scroll-mt-20">
-      <CardHeader icon={<LibraryIcon className="h-5 w-5" />} title="Libraries" description="Which Jellyfin libraries Autotagarr manages." />
+      <CardHeader icon={<LibraryIcon className="h-5 w-5" />} title="Libraries" description="Which Jellyfin libraries Tagarr manages." />
       <CardBody className="space-y-3">
         <label className="flex items-center gap-3 text-sm">
           <input type="checkbox" checked={all} onChange={() => setChosen(all ? (libraries.data ?? []).map((l) => l.id) : [])} className="h-4 w-4 accent-[hsl(var(--primary))]" />
@@ -240,6 +241,182 @@ function LibrariesCard({ s }: { s: SettingsData }) {
           </Button>
         )}
       </CardBody>
+    </Card>
+  );
+}
+
+interface WidgetKey {
+  id: number;
+  label: string;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+function homepageYaml(key: string) {
+  const origin = window.location.origin;
+  return `- Tagarr:
+    icon: ${origin}/icon-192.png
+    href: ${origin}/
+    description: Who sees what in Jellyfin
+    widget:
+      type: customapi
+      url: ${origin}/api/widget
+      refreshInterval: 300000
+      headers:
+        X-Api-Key: ${key}
+      mappings:
+        - field: untagged
+          label: Untagged
+          format: number
+        - field: shared
+          label: Shared
+          format: number
+        - field: waiting
+          label: Waiting
+          format: number
+        - field: suggestions
+          label: Suggestions
+          format: number`;
+}
+
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="shrink-0"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toast.error("Couldn't copy. Select it and copy by hand.");
+        }
+      }}
+    >
+      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      {copied ? "Copied" : label}
+    </Button>
+  );
+}
+
+function WidgetCard() {
+  const qc = useQueryClient();
+  const keys = useQuery({ queryKey: ["widget-keys"], queryFn: () => get<WidgetKey[]>("/widget-keys") });
+  const [label, setLabel] = useState("");
+  const [created, setCreated] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<WidgetKey | null>(null);
+  const create = useMutation({
+    mutationFn: () => api<{ id: number; key: string }>("POST", "/widget-keys", { label: label || "Homepage" }),
+    onSuccess: (res) => {
+      setCreated(res.key);
+      setLabel("");
+      qc.invalidateQueries({ queryKey: ["widget-keys"] });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const revoke = useMutation({
+    mutationFn: (id: number) => api("DELETE", `/widget-keys/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["widget-keys"] });
+      toast.success("Key revoked");
+      setRevoking(null);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  return (
+    <Card id="widget" className="scroll-mt-20">
+      <CardHeader
+        icon={<LayoutDashboard className="h-5 w-5" />}
+        title="Homepage widget"
+        description={
+          <>
+            Show untagged, shared, waiting and suggestion counts on a{" "}
+            <a href="https://gethomepage.dev/widgets/services/customapi/" target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+              Homepage
+            </a>{" "}
+            dashboard with its Custom API widget. The key only reads these numbers.
+          </>
+        }
+      />
+      <CardBody className="space-y-4">
+        {created ? (
+          <div className="space-y-3 rounded-xl border border-primary/30 bg-primary-soft/40 p-4">
+            <p className="text-sm font-medium">Copy this key now: it won't be shown again.</p>
+            <div className="flex gap-2">
+              <Input readOnly value={created} className="font-mono text-xs" onFocus={(e) => e.target.select()} />
+              <CopyButton text={created} />
+            </div>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-sm font-medium">Add this to Homepage's services.yaml</span>
+                <CopyButton text={homepageYaml(created)} label="Copy YAML" />
+              </div>
+              <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-[11px] leading-relaxed">{homepageYaml(created)}</pre>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                If Homepage reaches this app by another address (e.g. on a shared Docker network), change <code>url</code> to that. More fields: <code>total</code>,{" "}
+                <code>tagged_pct</code> (format: percent), <code>last_sync</code> (format: relativeDate), and per person{" "}
+                <code>{"field: { people: <tag> }"}</code>.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setCreated(null)}>
+              Done
+            </Button>
+          </div>
+        ) : (
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create.mutate();
+            }}
+          >
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label, e.g. Homepage" className="sm:max-w-xs" aria-label="Key label" />
+            <Button type="submit" variant="outline" loading={create.isPending}>
+              Create key
+            </Button>
+          </form>
+        )}
+
+        {!!keys.data?.length && (
+          <ul className="divide-y rounded-xl border">
+            {keys.data.map((k) => (
+              <li key={k.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="flex-1 font-medium">{k.label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {k.last_used_at ? `used ${timeAgo(k.last_used_at)}` : "never used"} · made {timeAgo(k.created_at)}
+                </span>
+                <Button variant="ghost" size="icon" onClick={() => setRevoking(k)} aria-label={`Revoke ${k.label}`}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+      {revoking && (
+        <Modal
+          open
+          onClose={() => setRevoking(null)}
+          title={`Revoke “${revoking.label}”?`}
+          description="Anything using this key stops getting numbers straight away."
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setRevoking(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => revoke.mutate(revoking.id)} loading={revoke.isPending}>
+                Revoke
+              </Button>
+            </>
+          }
+        >
+          <span />
+        </Modal>
+      )}
     </Card>
   );
 }
@@ -290,7 +467,7 @@ function AboutCard() {
     <Card id="about" className="scroll-mt-20">
       <CardBody className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <span className="font-semibold">Autotagarr</span> <span className="text-muted-foreground">{a.version}</span>
+          <span className="font-semibold">Tagarr</span> <span className="text-muted-foreground">{a.version}</span>
           <span className="ml-2 text-muted-foreground">
             {!a.update.enabled
               ? "· update check off"

@@ -43,7 +43,7 @@ export default function LibraryPage() {
   const [debouncedQ, setDebouncedQ] = useState(q);
   const [view, setView] = useState<"grid" | "list">(() => {
     try {
-      return localStorage.getItem("autotagarr-view") === "list" ? "list" : "grid";
+      return localStorage.getItem("tagarr-view") === "list" ? "list" : "grid";
     } catch {
       return "grid";
     }
@@ -103,7 +103,7 @@ export default function LibraryPage() {
   const setViewMode = (v: "grid" | "list") => {
     setView(v);
     try {
-      localStorage.setItem("autotagarr-view", v);
+      localStorage.setItem("tagarr-view", v);
     } catch {
       // Not remembered.
     }

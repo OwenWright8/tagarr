@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import type { DB } from "./db.ts";
 
 const SESSION_DAYS = 30;
-export const SESSION_COOKIE = "autotagarr_session";
+export const SESSION_COOKIE = "tagarr_session";
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
@@ -86,4 +86,21 @@ export class LoginLimiter {
     else this.failures.delete(ip);
     return list;
   }
+}
+
+// --- Widget keys (read-only stats for dashboards like Homepage) ---------------
+
+export function createWidgetKey(db: DB, label: string): { id: number; key: string } {
+  const key = `tgr_${crypto.randomBytes(24).toString("base64url")}`;
+  const res = db
+    .prepare("INSERT INTO widget_keys (label, key_hash, created_at) VALUES (?, ?, ?)")
+    .run(label, sha256(key), Date.now());
+  return { id: Number(res.lastInsertRowid), key };
+}
+
+/** True for a live key; records when it was last used. */
+export function useWidgetKey(db: DB, key: string | undefined): boolean {
+  if (!key) return false;
+  const res = db.prepare("UPDATE widget_keys SET last_used_at = ? WHERE key_hash = ?").run(Date.now(), sha256(key));
+  return res.changes > 0;
 }

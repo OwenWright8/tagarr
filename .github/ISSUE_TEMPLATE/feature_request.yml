@@ -1,5 +1,5 @@
 name: Feature request
-description: An idea to make Autotagarr better.
+description: An idea to make Tagarr better.
 labels: [enhancement]
 body:
   - type: textarea

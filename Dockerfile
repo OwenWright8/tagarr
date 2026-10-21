@@ -1,4 +1,4 @@
-# Autotagarr: one small image. The frontend is built once on the build
+# Tagarr: one small image. The frontend is built once on the build
 # machine's own architecture (it's static files) and copied into each target
 # image; the server is TypeScript that Node 24 runs directly, and SQLite is
 # built into Node, so there is no native module to compile for arm64.
@@ -33,15 +33,15 @@ VOLUME /data
 
 # Which release this is: shown in Settings and used by the update reminder.
 # The release workflow passes the tag; a local build is "dev".
-ARG AUTOTAGARR_BUILD_VERSION=dev
-ARG AUTOTAGARR_REPO=OwenWright8/autotagarr
-ENV AUTOTAGARR_BUILD_VERSION=$AUTOTAGARR_BUILD_VERSION \
-    AUTOTAGARR_REPO=$AUTOTAGARR_REPO
-LABEL org.opencontainers.image.title="Autotagarr" \
+ARG TAGARR_BUILD_VERSION=dev
+ARG TAGARR_REPO=OwenWright8/tagarr
+ENV TAGARR_BUILD_VERSION=$TAGARR_BUILD_VERSION \
+    TAGARR_REPO=$TAGARR_REPO
+LABEL org.opencontainers.image.title="Tagarr" \
       org.opencontainers.image.description="Automatic per-person tags for a shared Jellyfin library, driven by Seerr requests" \
-      org.opencontainers.image.version=$AUTOTAGARR_BUILD_VERSION \
+      org.opencontainers.image.version=$TAGARR_BUILD_VERSION \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://github.com/${AUTOTAGARR_REPO}"
+      org.opencontainers.image.source="https://github.com/${TAGARR_REPO}"
 
 EXPOSE 8686
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \

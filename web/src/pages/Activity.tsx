@@ -38,7 +38,7 @@ export default function ActivityPage() {
   if (!activity.data) return <PageSpinner />;
   return (
     <div className="animate-fade-in">
-      <PageHeader title="Activity" description="Every tag Autotagarr wrote or removed, requests it matched, and anything that went wrong." />
+      <PageHeader title="Activity" description="Every tag Tagarr wrote or removed, requests it matched, and anything that went wrong." />
       <Card>
         <CardBody>
           <ActivityList entries={activity.data} empty="Nothing has happened yet." />

@@ -1,4 +1,4 @@
-// The sync engine. Autotagarr keeps its own record of who each item belongs to
+// The sync engine. Tagarr keeps its own record of who each item belongs to
 // (the `assignments` table) and makes Jellyfin's tags match it:
 //
 //   1. Refresh the library from Jellyfin.

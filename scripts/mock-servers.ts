@@ -1,6 +1,6 @@
 // Fake Jellyfin and Seerr servers with a small demo library, for development,
 // the integration tests and the README screenshots. Only the endpoints
-// Autotagarr uses are implemented, with the same shapes as the real APIs.
+// Tagarr uses are implemented, with the same shapes as the real APIs.
 //
 //   npm run dev:mock      # Jellyfin on :8096 (key "jellyfin-key"), Seerr on :5055 (key "seerr-key")
 import http from "node:http";

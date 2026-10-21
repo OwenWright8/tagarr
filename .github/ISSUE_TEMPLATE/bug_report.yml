@@ -8,7 +8,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Autotagarr version
+      label: Tagarr version
       placeholder: v1.0.0
     validations:
       required: true
@@ -28,5 +28,5 @@ body:
     id: activity
     attributes:
       label: Activity page / container logs
-      description: Any errors from the Activity page or `docker compose logs autotagarr`. Remove API keys and webhook addresses.
+      description: Any errors from the Activity page or `docker compose logs tagarr`. Remove API keys and webhook addresses.
       render: text

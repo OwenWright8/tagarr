@@ -19,7 +19,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith("/login") && !path.startsWith("/account")) {
-      window.dispatchEvent(new Event("autotagarr:signed-out"));
+      window.dispatchEvent(new Event("tagarr:signed-out"));
     }
     throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`);
   }

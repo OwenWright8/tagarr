@@ -115,7 +115,7 @@ function ThemeButton() {
 function UpdateBanner() {
   const about = useQuery({ queryKey: ["about"], queryFn: () => get<About>("/about"), staleTime: 3_600_000 });
   const latest = about.data?.update.latest;
-  const key = `autotagarr-dismissed-${latest}`;
+  const key = `tagarr-dismissed-${latest}`;
   const [dismissed, setDismissed] = useState(() => {
     try {
       return !!localStorage.getItem(key);
@@ -127,7 +127,7 @@ function UpdateBanner() {
   return (
     <div className="flex items-center justify-center gap-3 border-b bg-primary-soft px-4 py-2 text-[13px] text-primary">
       <span>
-        <strong className="font-semibold">Autotagarr {latest}</strong> is available —{" "}
+        <strong className="font-semibold">Tagarr {latest}</strong> is available —{" "}
         <a href={about.data.update.url ?? "#"} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">
           What's new
         </a>
@@ -164,7 +164,7 @@ export function Layout({ onSignOut }: { onSignOut: () => void }) {
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card/60 px-3 py-4 lg:flex">
           <div className="mb-6 flex items-center gap-2.5 px-2">
             <Logo />
-            <span className="text-[17px] font-semibold tracking-tight">Autotagarr</span>
+            <span className="text-[17px] font-semibold tracking-tight">Tagarr</span>
           </div>
           <nav className="flex flex-col gap-0.5">
             {NAV.map((item) => (
@@ -206,7 +206,7 @@ export function Layout({ onSignOut }: { onSignOut: () => void }) {
           <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-background/85 px-4 py-2.5 backdrop-blur lg:hidden">
             <div className="flex items-center gap-2">
               <Logo className="h-7 w-7" />
-              <span className="font-semibold tracking-tight">Autotagarr</span>
+              <span className="font-semibold tracking-tight">Tagarr</span>
             </div>
             <div className="flex items-center">
               <SyncButton compact />

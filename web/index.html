@@ -8,11 +8,11 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>Autotagarr</title>
+    <title>Tagarr</title>
     <script>
       // Apply the saved theme before first paint, so dark mode doesn't flash.
       try {
-        var t = localStorage.getItem("autotagarr-theme") || "system";
+        var t = localStorage.getItem("tagarr-theme") || "system";
         var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
         if (dark) document.documentElement.classList.add("dark");
       } catch (e) {}

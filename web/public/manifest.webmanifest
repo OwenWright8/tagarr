@@ -1,6 +1,6 @@
 {
-  "name": "Autotagarr",
-  "short_name": "Autotagarr",
+  "name": "Tagarr",
+  "short_name": "Tagarr",
   "description": "Automatic per-person tags for a shared Jellyfin library",
   "start_url": "/",
   "display": "standalone",

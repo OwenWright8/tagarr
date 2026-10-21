@@ -34,7 +34,7 @@ export default function AuthPage({ mode }: { mode: "create" | "signin" }) {
       <div className="relative w-full max-w-sm animate-fade-in">
         <div className="mb-7 flex flex-col items-center text-center">
           <Logo className="mb-4 h-14 w-14 rounded-2xl shadow-md" />
-          <h1 className="text-2xl font-semibold">{creating ? "Welcome to Autotagarr" : "Sign in"}</h1>
+          <h1 className="text-2xl font-semibold">{creating ? "Welcome to Tagarr" : "Sign in"}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {creating ? "Create the admin account for this instance." : "Sign in to manage your library's tags."}
           </p>

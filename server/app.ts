@@ -18,11 +18,13 @@ import {
   LoginLimiter,
   SESSION_COOKIE,
   createSession,
+  createWidgetKey,
   deleteAllSessions,
   deleteSession,
   hashPassword,
   randomSecret,
   safeEqual,
+  useWidgetKey,
   validSession,
   verifyPassword,
 } from "./auth.ts";
@@ -67,7 +69,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
   };
 
   // Everything under /api needs a session except these.
-  const PUBLIC = new Set(["/api/health", "/api/session", "/api/login", "/api/account/create"]);
+  const PUBLIC = new Set(["/api/health", "/api/session", "/api/login", "/api/account/create", "/api/widget"]);
   app.addHook("onRequest", async (req, reply) => {
     const url = req.url.split("?")[0];
     if (!url.startsWith("/api/") || PUBLIC.has(url) || url.startsWith("/api/webhook")) return;
@@ -169,10 +171,28 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
 
   // --- Overview --------------------------------------------------------------------
 
+  const count = (sql: string, ...args: (string | number)[]) => (db.prepare(sql).get(...args) as { n: number }).n;
+
+  function totals() {
+    return {
+      items: count("SELECT count(*) AS n FROM items"),
+      movies: count("SELECT count(*) AS n FROM items WHERE type = 'Movie'"),
+      shows: count("SELECT count(*) AS n FROM items WHERE type = 'Series'"),
+      untagged: count("SELECT count(*) AS n FROM items i WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = i.id)"),
+      shared: count("SELECT count(*) AS n FROM (SELECT item_id FROM assignments GROUP BY item_id HAVING count(*) > 1)"),
+      pendingRequests: count("SELECT count(*) AS n FROM requests WHERE item_id IS NULL AND status != ?", REQUEST_DECLINED),
+      unmappedRequests: count(
+        `SELECT count(*) AS n FROM requests r WHERE status != ? AND applied = 0 AND item_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM people p WHERE p.seerr_user_id = r.seerr_user_id)`,
+        REQUEST_DECLINED,
+      ),
+      suggestions: count("SELECT count(*) AS n FROM suggestions WHERE dismissed = 0"),
+    };
+  }
+
   app.get("/api/overview", async () => {
     const s = getSettings(db);
     const people = listPeople(db);
-    const count = (sql: string, ...args: (string | number)[]) => (db.prepare(sql).get(...args) as { n: number }).n;
     const perPerson = people.map((p) => ({
       ...publicPerson(p),
       count: count("SELECT count(*) AS n FROM assignments WHERE person_id = ?", p.id),
@@ -184,24 +204,62 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     const activity = db.prepare("SELECT * FROM activity ORDER BY id DESC LIMIT 12").all();
     return {
       connections: { jellyfin: !!(s.jellyfinUrl && s.jellyfinApiKey), seerr: !!(s.seerrUrl && s.seerrApiKey) },
-      totals: {
-        items: count("SELECT count(*) AS n FROM items"),
-        movies: count("SELECT count(*) AS n FROM items WHERE type = 'Movie'"),
-        shows: count("SELECT count(*) AS n FROM items WHERE type = 'Series'"),
-        untagged: count("SELECT count(*) AS n FROM items i WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = i.id)"),
-        shared: count("SELECT count(*) AS n FROM (SELECT item_id FROM assignments GROUP BY item_id HAVING count(*) > 1)"),
-        pendingRequests: count("SELECT count(*) AS n FROM requests WHERE item_id IS NULL AND status != ?", REQUEST_DECLINED),
-        unmappedRequests: count(
-          `SELECT count(*) AS n FROM requests r WHERE status != ? AND applied = 0 AND item_id IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM people p WHERE p.seerr_user_id = r.seerr_user_id)`,
-          REQUEST_DECLINED,
-        ),
-        suggestions: count("SELECT count(*) AS n FROM suggestions WHERE dismissed = 0"),
-      },
+      totals: totals(),
       people: perPerson,
       activity,
       sync: engine.status,
     };
+  });
+
+  // --- Homepage widget -----------------------------------------------------------------
+  // Read-only numbers for dashboards (Homepage's "Custom API" widget, or
+  // anything that can GET JSON). Authenticated by a key in the X-Api-Key
+  // header, made in Settings; no session, since the caller is a server.
+
+  app.get("/api/widget", async (req, reply) => {
+    const key = req.headers["x-api-key"];
+    if (!useWidgetKey(db, Array.isArray(key) ? key[0] : key)) return reply.code(401).send({ error: "Missing or unknown X-Api-Key" });
+    const t = totals();
+    const people = listPeople(db).map((p) => ({
+      name: p.name,
+      tag: p.tag,
+      count: count("SELECT count(*) AS n FROM assignments WHERE person_id = ?", p.id),
+    }));
+    const status = engine.status;
+    return {
+      untagged: t.untagged,
+      shared: t.shared,
+      waiting: t.pendingRequests,
+      suggestions: t.suggestions,
+      unlinked_requests: t.unmappedRequests,
+      total: t.items,
+      movies: t.movies,
+      shows: t.shows,
+      tagged_pct: t.items ? Math.round(((t.items - t.untagged) / t.items) * 100) : 100,
+      last_sync: status.finishedAt ? new Date(status.finishedAt).toISOString() : null,
+      last_sync_ok: status.ok,
+      // Per person, by tag, e.g. people.Owen (Homepage: field: { people: Owen }).
+      people: Object.fromEntries(people.map((p) => [p.tag, p.count])),
+    };
+  });
+
+  app.get("/api/widget-keys", async () =>
+    db.prepare("SELECT id, label, created_at, last_used_at FROM widget_keys ORDER BY id").all(),
+  );
+
+  app.post<{ Body: { label?: string } }>("/api/widget-keys", async (req) => {
+    const label = String(req.body?.label ?? "").trim().slice(0, 60) || "Homepage";
+    const created = createWidgetKey(db, label);
+    logActivity(db, "access", `Created widget key “${label}”`);
+    return created;
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/widget-keys/:id", async (req, reply) => {
+    const row = db.prepare("SELECT label FROM widget_keys WHERE id = ?").get(Number(req.params.id)) as { label: string } | undefined;
+    if (!row) return reply.code(404).send({ error: "No such key" });
+    db.prepare("DELETE FROM widget_keys WHERE id = ?").run(Number(req.params.id));
+    logActivity(db, "access", `Revoked widget key “${row.label}”`);
+    return { ok: true };
   });
 
   // --- Items -----------------------------------------------------------------------
@@ -732,7 +790,7 @@ function friendlyConnectionError(service: string, err: unknown): string {
   const text = errorText(err);
   if (/→ 401|→ 403/.test(text)) return `${service} rejected the API key`;
   if (/ECONNREFUSED/.test(text)) return `Nothing answered at that address (connection refused). Check the host and port.`;
-  if (/ENOTFOUND|EAI_AGAIN/.test(text)) return `That host name doesn't resolve from the Autotagarr container.`;
+  if (/ENOTFOUND|EAI_AGAIN/.test(text)) return `That host name doesn't resolve from the Tagarr container.`;
   if (/timed out/.test(text)) return `${service} didn't answer in time`;
   if (/→ 404/.test(text)) return `That address answered, but doesn't look like ${service}. Check the URL (and any base path).`;
   return text;

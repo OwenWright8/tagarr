@@ -13,7 +13,7 @@ const COPY: Record<Service, { name: string; placeholder: string; keyHint: React.
     placeholder: "http://jellyfin:8096",
     keyHint: (
       <>
-        In Jellyfin: <strong>Dashboard → API Keys → +</strong>. Name it “Autotagarr”.
+        In Jellyfin: <strong>Dashboard → API Keys → +</strong>. Name it “Tagarr”.
       </>
     ),
   },
@@ -99,7 +99,7 @@ export function ConnectionForm({
 
   return (
     <form onSubmit={save} className="space-y-4">
-      <Field label={`${copy.name} address`} htmlFor={`${service}-url`} hint="The address Autotagarr's container can reach it at, e.g. its compose service name, or a LAN IP and port.">
+      <Field label={`${copy.name} address`} htmlFor={`${service}-url`} hint="The address Tagarr's container can reach it at, e.g. its compose service name, or a LAN IP and port.">
         <Input id={`${service}-url`} value={url} onChange={(e) => setUrl(e.target.value)} placeholder={copy.placeholder} required inputMode="url" autoComplete="off" />
       </Field>
       <Field label="API key" htmlFor={`${service}-key`} hint={copy.keyHint}>

@@ -20,8 +20,8 @@ export default function App() {
 
   useEffect(() => {
     const onSignedOut = () => qc.invalidateQueries({ queryKey: ["session"] });
-    window.addEventListener("autotagarr:signed-out", onSignedOut);
-    return () => window.removeEventListener("autotagarr:signed-out", onSignedOut);
+    window.addEventListener("tagarr:signed-out", onSignedOut);
+    return () => window.removeEventListener("tagarr:signed-out", onSignedOut);
   }, [qc]);
 
   if (session.isLoading || !session.data) return <PageSpinner />;

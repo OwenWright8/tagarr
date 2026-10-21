@@ -2,18 +2,18 @@
 
 <img src="web/public/icon-512.png" alt="" width="96" height="96" />
 
-# Autotagarr
+# Tagarr
 
 **One Jellyfin library, shared by a few people, and everyone only sees their own stuff.**<br/>
 Whatever someone requests in Seerr gets tagged with their name. Shows you both watch get both tags.
 
-[![Latest release](https://img.shields.io/github/v/release/OwenWright8/autotagarr?sort=semver&label=release)](https://github.com/OwenWright8/autotagarr/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/OwenWright8/autotagarr/ci.yml?branch=main&label=CI)](https://github.com/OwenWright8/autotagarr/actions/workflows/ci.yml)
-[![Images on GHCR](https://img.shields.io/badge/images-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/OwenWright8/autotagarr/pkgs/container/autotagarr)
+[![Latest release](https://img.shields.io/github/v/release/OwenWright8/tagarr?sort=semver&label=release)](https://github.com/OwenWright8/tagarr/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/OwenWright8/tagarr/ci.yml?branch=main&label=CI)](https://github.com/OwenWright8/tagarr/actions/workflows/ci.yml)
+[![Images on GHCR](https://img.shields.io/badge/images-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/OwenWright8/tagarr/pkgs/container/tagarr)
 ![amd64 | arm64](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-555)
-[![MIT license](https://img.shields.io/github/license/OwenWright8/autotagarr)](LICENSE)
+[![MIT license](https://img.shields.io/github/license/OwenWright8/tagarr)](LICENSE)
 
-[Quickstart](#quickstart) · [How it works](#how-it-works) · [Hiding each other's stuff](#hiding-each-others-stuff) · [Settings](#settings) · [Updating](#updating) · [FAQ](#faq)
+[Quickstart](#quickstart) · [How it works](#how-it-works) · [Hiding each other's stuff](#hiding-each-others-stuff) · [Homepage widget](#homepage-widget) · [Settings](#settings) · [Updating](#updating) · [FAQ](#faq)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/library-dark.png" />
@@ -22,18 +22,19 @@ Whatever someone requests in Seerr gets tagged with their name. Shows you both w
 
 </div>
 
-## Why Autotagarr
+## Why Tagarr
 
 Jellyfin can limit a user to items with certain tags, which is the cleanest way to share one library between a couple or housemates without everyone's shows piling up on everyone's home screen. The catch is the tagging: it's manual, it's easy to forget, and an untagged show silently vanishes for everybody.
 
-Autotagarr does the tagging for you.
+Tagarr does the tagging for you.
 
 - **Requests tag themselves.** Request something in Seerr and it's tagged with your name the moment it lands in Jellyfin. Your partner's requests get theirs.
 - **Shared is automatic.** If you both request a show, or you add yourself to one of theirs, it carries both tags and shows up for both of you.
 - **Nothing gets lost.** Untagged titles are front and centre, watch history suggests who something belongs to, and an optional rule hands unrequested items to whoever you choose.
-- **Tags stay put.** Autotagarr keeps its own record and quietly puts back any tag a metadata refresh wipes.
+- **Tags stay put.** Tagarr keeps its own record and quietly puts back any tag a metadata refresh wipes.
 - **One-click tagging.** Every poster has each person's face under it: click to add or remove. Select a whole row to tag in bulk.
 - **Sets up the hiding too.** The Access page sets each Jellyfin user to only see their tag, without touching the rest of their profile.
+- **On your dashboard.** A [Homepage](https://gethomepage.dev) widget shows what's untagged, shared and waiting at a glance.
 - **Yours to run.** One small container, one volume, no accounts anywhere. Works on a Raspberry Pi.
 
 <table>
@@ -65,7 +66,7 @@ Autotagarr does the tagging for you.
 
 ## Self-hosting
 
-Autotagarr is a single container with a single volume. It talks to Jellyfin and Seerr over their APIs; it doesn't need access to your media files. Images are published for `amd64` and `arm64`.
+Tagarr is a single container with a single volume. It talks to Jellyfin and Seerr over their APIs; it doesn't need access to your media files. Images are published for `amd64` and `arm64`.
 
 Works with **Jellyfin 10.9+** (10.8 works for tagging; see the [FAQ](#faq) for access rules) and **Seerr**, **Jellyseerr** or **Overseerr**.
 
@@ -75,22 +76,22 @@ Works with **Jellyfin 10.9+** (10.8 works for tagging; see the [FAQ](#faq) for a
 
 ```yaml
 services:
-  autotagarr:
-    image: ghcr.io/owenwright8/autotagarr:latest
-    container_name: autotagarr
+  tagarr:
+    image: ghcr.io/owenwright8/tagarr:latest
+    container_name: tagarr
     restart: unless-stopped
     environment:
       TZ: America/Indiana/Indianapolis   # optional, for log timestamps
     volumes:
-      - autotagarr-data:/data
+      - tagarr-data:/data
     ports:
       - "8686:8686"
 
 volumes:
-  autotagarr-data:
+  tagarr-data:
 ```
 
-Already running Jellyfin and Seerr with Compose? Add the `autotagarr` service to that file instead, and it can reach them by their service names.
+Already running Jellyfin and Seerr with Compose? Add the `tagarr` service to that file instead, and it can reach them by their service names.
 
 **2.** Start it:
 
@@ -111,13 +112,13 @@ That's it. The first sync tags everything that's already been requested.
 
 ### Instant tagging with the Seerr webhook
 
-Autotagarr syncs every 15 minutes on its own. To have requests tagged the moment they're available:
+Tagarr syncs every 15 minutes on its own. To have requests tagged the moment they're available:
 
 1. In Seerr, go to **Settings → Notifications → Webhook** and turn it on.
-2. Paste the **Webhook URL** from Autotagarr's **Settings → Instant tagging** (it looks like `http://<autotagarr>:8686/api/webhook/<secret>`). If Seerr reaches Autotagarr by a different address, such as `http://autotagarr:8686` on a shared Docker network, use that host with the same path.
+2. Paste the **Webhook URL** from Tagarr's **Settings → Instant tagging** (it looks like `http://<tagarr>:8686/api/webhook/<secret>`). If Seerr reaches Tagarr by a different address, such as `http://tagarr:8686` on a shared Docker network, use that host with the same path.
 3. Tick **Request Approved**, **Request Automatically Approved** and **Media Available**. Leave the JSON payload as it is.
 
-The webhook doesn't carry any data Autotagarr trusts. It just says "something changed", and Autotagarr reads the details from Seerr and Jellyfin itself. The [Jellyfin Webhook plugin](https://github.com/jellyfin/jellyfin-plugin-webhook) can call the same address on **Item Added** too.
+The webhook doesn't carry any data Tagarr trusts. It just says "something changed", and Tagarr reads the details from Seerr and Jellyfin itself. The [Jellyfin Webhook plugin](https://github.com/jellyfin/jellyfin-plugin-webhook) can call the same address on **Item Added** too.
 
 ## How it works
 
@@ -125,12 +126,12 @@ The webhook doesn't carry any data Autotagarr trusts. It just says "something ch
 flowchart LR
     A["You request a show<br/>in Seerr"] --> B["Sonarr / Radarr<br/>download it"]
     B --> C["It appears<br/>in Jellyfin"]
-    C --> D["Autotagarr matches the request<br/>(Jellyfin id, TMDB or TVDB)"]
+    C --> D["Tagarr matches the request<br/>(Jellyfin id, TMDB or TVDB)"]
     D --> E["Adds your tag<br/>to the item"]
     E --> F["It shows up for you,<br/>and nobody else"]
 ```
 
-On every sync (every 15 minutes, on a webhook, or when you press **Sync now**), Autotagarr:
+On every sync (every 15 minutes, on a webhook, or when you press **Sync now**), Tagarr:
 
 1. **Reads the library** from Jellyfin: every movie and show, with their tags.
 2. **Picks up existing tags.** If an item already has someone's tag, it's recorded as theirs. This is how an existing setup is adopted, and why adding a tag in Jellyfin's own editor sticks.
@@ -139,11 +140,11 @@ On every sync (every 15 minutes, on a webhook, or when you press **Sync now**), 
 5. **Collects suggestions** from linked users' watch history.
 6. **Writes missing tags** to Jellyfin. This also repairs tags lost to a metadata refresh.
 
-Removing someone from an item in Autotagarr removes the tag in Jellyfin immediately. Only people's tags are ever touched: tags like `IMAX` or `4K` are left alone.
+Removing someone from an item in Tagarr removes the tag in Jellyfin immediately. Only people's tags are ever touched: tags like `IMAX` or `4K` are left alone.
 
 ## Hiding each other's stuff
 
-This is the part that makes a shared library feel like your own. Jellyfin's parental controls can restrict a user to **items with certain tags**. Combined with Autotagarr:
+This is the part that makes a shared library feel like your own. Jellyfin's parental controls can restrict a user to **items with certain tags**. Combined with Tagarr:
 
 | | Tagged | You see it? | They see it? |
 |---|---|---|---|
@@ -152,11 +153,66 @@ This is the part that makes a shared library feel like your own. Jellyfin's pare
 | You both requested it, or you added yourself | `Owen`, `Alex` | ✅ | ✅ |
 | Nobody requested it | *(none)* | — | — |
 
-**Set it up on the Access page:** click **Change** on each Jellyfin user, choose **Only items tagged for…**, pick that person, and **Save to Jellyfin**. Autotagarr only changes the user's allowed tags; the rest of their profile is left as it is. (You can also do this by hand in Jellyfin under **Dashboard → Users → *user* → Parental control → Allow items with tags**.)
+**Set it up on the Access page:** click **Change** on each Jellyfin user, choose **Only items tagged for…**, pick that person, and **Save to Jellyfin**. Tagarr only changes the user's allowed tags; the rest of their profile is left as it is. (You can also do this by hand in Jellyfin under **Dashboard → Users → *user* → Parental control → Allow items with tags**.)
 
 Do this **after** the first sync has tagged things, and keep an eye on **Untagged** on the Overview: a user limited to their own tag can't see untagged items. If plenty of things get added outside Seerr, turn on **Items nobody requested** under **Settings → Automation** to hand them to chosen people automatically after a grace period.
 
 > **Tip:** want some things to show for everyone, like kids' films? Add a person called "Everyone" with no Seerr or Jellyfin account, and include their tag in each user's allowed tags on the Access page. Tag anything with Everyone and it shows for all.
+
+## Homepage widget
+
+Show Tagarr's numbers on a [Homepage](https://gethomepage.dev) dashboard with its built-in [Custom API widget](https://gethomepage.dev/widgets/services/customapi/).
+
+1. In Tagarr, go to **Settings → Homepage widget** and **Create key**. The key is shown once, with a ready-to-paste snippet.
+2. Add it to Homepage's `services.yaml`:
+
+```yaml
+- Tagarr:
+    icon: http://<tagarr>:8686/icon-192.png
+    href: http://<tagarr>:8686/
+    description: Who sees what in Jellyfin
+    widget:
+      type: customapi
+      url: http://<tagarr>:8686/api/widget
+      refreshInterval: 300000
+      headers:
+        X-Api-Key: tgr_your_key_here
+      mappings:
+        - field: untagged
+          label: Untagged
+          format: number
+        - field: shared
+          label: Shared
+          format: number
+        - field: waiting
+          label: Waiting
+          format: number
+        - field: suggestions
+          label: Suggestions
+          format: number
+```
+
+If Homepage runs on the same Docker network, use `http://tagarr:8686` for `url`.
+
+<details>
+<summary>Every field <code>/api/widget</code> returns</summary>
+
+| Field | Format | What it is |
+|---|---|---|
+| `untagged` | number | Titles with nobody's tag (hidden from anyone with an access rule) |
+| `shared` | number | Titles tagged for two or more people |
+| `waiting` | number | Seerr requests not in Jellyfin yet |
+| `suggestions` | number | Watch-history suggestions waiting for you |
+| `unlinked_requests` | number | Requests from Seerr users not linked to a person |
+| `total`, `movies`, `shows` | number | Library size |
+| `tagged_pct` | percent | Share of the library that has an owner |
+| `last_sync` | relativeDate | When the last sync finished |
+| `last_sync_ok` | text | `true`, or `false` if it had problems |
+| `people` | number | Per person, by tag: `field: { people: Owen }` |
+
+</details>
+
+The key can only read these numbers. Revoke it any time under **Settings → Homepage widget**; each key shows when it was last used.
 
 ## Settings
 
@@ -167,7 +223,7 @@ Everything is configured in the web UI. The compose file only takes these, all o
 | `APP_PORT` | The port published on the host when using this repo's `docker-compose.yml` (default `8686`). With the quickstart file, change the left-hand `8686` instead. |
 | `TZ` | Time zone for log timestamps. |
 | `UPDATE_CHECK` | `off` stops the server checking GitHub for new releases, and hides the update reminder (default `on`). |
-| `AUTOTAGARR_VERSION` | Pin a release (`v1.0.0`) or a minor series (`1.0`, which still gets bug fixes) instead of `latest`. |
+| `TAGARR_VERSION` | Pin a release (`v1.0.0`) or a minor series (`1.0`, which still gets bug fixes) instead of `latest`. |
 
 And in **Settings** in the app:
 
@@ -177,28 +233,28 @@ And in **Settings** in the app:
 | **Items nobody requested** | Off | Give untagged, unrequested items to chosen people once they've been in Jellyfin for a grace period (default 24 h). Applied once per item. |
 | **Suggestions from watch history** | On | List titles a linked Jellyfin user has watched but isn't tagged on. Nothing is tagged without you clicking. |
 | **Tag seasons and episodes too** | Off | Copy each show's people tags onto its seasons and episodes. Jellyfin 10.9+ applies a show's tags to its episodes itself, so this is only for older servers, or if episodes of hidden shows still appear in *Continue Watching*. |
-| **Libraries** | All | Limit Autotagarr to some of your movie and show libraries. |
+| **Libraries** | All | Limit Tagarr to some of your movie and show libraries. |
 
 ## Updating
 
-When a new release is out, a slim **"Autotagarr v1.1.0 is available — What's new"** note appears at the top of the app. To update:
+When a new release is out, a slim **"Tagarr v1.1.0 is available — What's new"** note appears at the top of the app. To update:
 
 ```sh
 docker compose pull && docker compose up -d
 ```
 
-The database migrates itself. Read the [release notes](https://github.com/OwenWright8/autotagarr/releases) first: anything you need to do will be at the top.
+The database migrates itself. Read the [release notes](https://github.com/OwenWright8/tagarr/releases) first: anything you need to do will be at the top.
 
 **How the check works.** Every 12 hours the container makes one anonymous request to GitHub's public API for the latest release. Nothing about your instance is sent, and browsers never contact GitHub themselves. `UPDATE_CHECK=off` stops it.
 
 ## Backups
 
-Everything (settings, API keys, people, the tag record and the activity log) is one SQLite database in the `autotagarr-data` volume. From the folder with your `docker-compose.yml`:
+Everything (settings, API keys, people, the tag record and the activity log) is one SQLite database in the `tagarr-data` volume. From the folder with your `docker-compose.yml`:
 
 ```sh
 docker compose stop
-docker run --rm -v "$(basename "$PWD")_autotagarr-data":/data -v "$PWD":/backup alpine \
-  tar czf "/backup/autotagarr-$(date +%F).tar.gz" -C /data .
+docker run --rm -v "$(basename "$PWD")_tagarr-data":/data -v "$PWD":/backup alpine \
+  tar czf "/backup/tagarr-$(date +%F).tar.gz" -C /data .
 docker compose start
 ```
 
@@ -209,10 +265,14 @@ docker compose start
 - **The admin account is the only account.** It's separate from Jellyfin and Seerr, and sign-in attempts are rate limited per client address.
 - **API keys stay on the server.** They're stored in the data volume and never sent to the browser. Treat the volume like a `.env` file.
 - **Use HTTPS if it's reachable from outside your network.** The container speaks plain HTTP; put it behind your reverse proxy (Caddy, Traefik, nginx…) or keep it on your LAN / VPN. There's nothing to configure for a proxy.
+- **Widget keys only read counts.** They're stored hashed, can't change anything, and can be revoked in Settings.
 - **The webhook address contains a secret.** Anyone with it can trigger a sync (nothing more). You can rotate it under **Settings → Instant tagging**.
 - **Hardened container.** It runs as an unprivileged user, and this repo's compose file also runs it with a read-only filesystem and `no-new-privileges`.
 
 ## FAQ
+
+**Coming from v0.1.0, when it was called Autotagarr?**<br/>
+Change the image to `ghcr.io/owenwright8/tagarr` and keep your existing volume mapped to `/data`. The database is renamed on first start, and you'll just need to sign in again.
 
 **I already tag things by hand. Will this mess them up?**<br/>
 No. When you add a person, pick their existing tag (the box suggests the tags already in your library). The first sync records everything that already has it. Tags that aren't people's tags are never touched.

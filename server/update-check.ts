@@ -32,7 +32,7 @@ export class UpdateChecker {
 
   async check() {
     const res = await fetch(`https://api.github.com/repos/${this.repo}/releases/latest`, {
-      headers: { Accept: "application/vnd.github+json", "User-Agent": "autotagarr-update-check" },
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "tagarr-update-check" },
       signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) return;

@@ -52,29 +52,29 @@ jobs:
         with:
           context: .
           load: true
-          tags: autotagarr:ci
+          tags: tagarr:ci
 
       - name: Start and probe
         run: |
-          docker volume create autotagarr-ci
-          docker run -d --name autotagarr --read-only --tmpfs /tmp -v autotagarr-ci:/data -p 8686:8686 -e UPDATE_CHECK=off autotagarr:ci
+          docker volume create tagarr-ci
+          docker run -d --name tagarr --read-only --tmpfs /tmp -v tagarr-ci:/data -p 8686:8686 -e UPDATE_CHECK=off tagarr:ci
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:8686/api/session; then break; fi
             sleep 1
           done
           echo
-          curl -fsS http://localhost:8686/ | grep -q '<title>Autotagarr</title>'
+          curl -fsS http://localhost:8686/ | grep -q '<title>Tagarr</title>'
           curl -fsS http://localhost:8686/library | grep -q '<div id="root">'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8686/api/overview)" = 401
           for i in $(seq 1 30); do
-            [ "$(docker inspect -f '{{.State.Health.Status}}' autotagarr)" = healthy ] && break
+            [ "$(docker inspect -f '{{.State.Health.Status}}' tagarr)" = healthy ] && break
             sleep 2
           done
-          docker inspect -f '{{.State.Health.Status}}' autotagarr | grep -q healthy
+          docker inspect -f '{{.State.Health.Status}}' tagarr | grep -q healthy
 
       - name: Logs
         if: always()
-        run: docker logs autotagarr || true
+        run: docker logs tagarr || true
 
   # arm64 (Raspberry Pi and other ARM servers): build only, under emulation.
   docker-arm64:

@@ -1,5 +1,5 @@
 // UI smoke test and README screenshots, in one pass. Starts the fake Jellyfin
-// and Seerr (scripts/mock-servers.ts) and a fresh Autotagarr, walks through the
+// and Seerr (scripts/mock-servers.ts) and a fresh Tagarr, walks through the
 // setup wizard in Chromium like a new user, then visits every page.
 //
 //   npm run build && npm run screenshots          # smoke test only
@@ -18,11 +18,11 @@ const outDir = path.join(root, "docs/screenshots");
 const write = process.env.SCREENSHOTS === "1";
 
 const mock = await startMocks();
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "autotagarr-shots-"));
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "tagarr-shots-"));
 const { app, engine } = await buildApp({
   db: openDb(path.join(dataDir, "db.sqlite")),
   version: "v1.0.0",
-  repo: "OwenWright8/autotagarr",
+  repo: "OwenWright8/tagarr",
   updateCheck: false,
   webRoot: path.join(root, "dist/web"),
 });
@@ -174,6 +174,17 @@ try {
       await step("activity", async () => {
         await p.goto(`${base}/activity`);
         await shot(p, "activity");
+      });
+      await step("homepage widget key", async () => {
+        await p.goto(`${base}/settings#widget`);
+        await p.getByLabel("Key label").fill("Homepage");
+        await p.getByRole("button", { name: "Create key" }).click();
+        const key = await p.locator("#widget input[readonly]").first().inputValue();
+        const res = await fetch(`${base}/api/widget`, { headers: { "X-Api-Key": key } });
+        const stats = (await res.json()) as { untagged?: number };
+        if (res.status !== 200 || typeof stats.untagged !== "number") throw new Error(`widget answered ${res.status}`);
+        console.log("  ✓ widget");
+        await p.getByRole("button", { name: "Done" }).click();
       });
       await step("settings", async () => {
         await p.goto(`${base}/settings`);

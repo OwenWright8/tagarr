@@ -12,11 +12,20 @@ import { buildApp } from "./app.ts";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 8686);
 const dataDir = process.env.DATA_DIR || (fs.existsSync("/data") ? "/data" : path.resolve(here, "../data"));
-const version = process.env.AUTOTAGARR_BUILD_VERSION || "dev";
-const repo = process.env.AUTOTAGARR_REPO || "OwenWright8/autotagarr";
+const version = process.env.TAGARR_BUILD_VERSION || "dev";
+const repo = process.env.TAGARR_REPO || "OwenWright8/tagarr";
 const updateCheck = !/^(off|false|0|no)$/i.test(process.env.UPDATE_CHECK ?? "on");
 
-const db = openDb(path.join(dataDir, "autotagarr.db"));
+// v0.1.0 shipped as "Autotagarr": carry its database over to the new name.
+const dbFile = path.join(dataDir, "tagarr.db");
+const legacy = path.join(dataDir, "autotagarr.db");
+if (!fs.existsSync(dbFile) && fs.existsSync(legacy)) {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    if (fs.existsSync(legacy + suffix)) fs.renameSync(legacy + suffix, dbFile + suffix);
+  }
+  console.log("[tagarr] moved autotagarr.db to tagarr.db");
+}
+const db = openDb(dbFile);
 const { app, engine, updates } = await buildApp({
   db,
   version,
@@ -26,7 +35,7 @@ const { app, engine, updates } = await buildApp({
 });
 
 await app.listen({ host: "0.0.0.0", port });
-console.log(`[autotagarr] ${version} listening on :${port} (data in ${dataDir})`);
+console.log(`[tagarr] ${version} listening on :${port} (data in ${dataDir})`);
 engine.start();
 updates.start();
 

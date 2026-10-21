@@ -62,7 +62,7 @@ export class Jellyfin {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: {
-        Authorization: `MediaBrowser Client="Autotagarr", Device="Autotagarr", DeviceId="autotagarr", Version="1", Token="${this.apiKey}"`,
+        Authorization: `MediaBrowser Client="Tagarr", Device="Tagarr", DeviceId="tagarr", Version="1", Token="${this.apiKey}"`,
         Accept: "application/json",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       },

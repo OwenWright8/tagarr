@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 export type Theme = "light" | "dark" | "system";
-const KEY = "autotagarr-theme";
+const KEY = "tagarr-theme";
 
 function read(): Theme {
   try {

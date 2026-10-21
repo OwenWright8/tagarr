@@ -34,7 +34,7 @@ export default function SetupPage() {
         <div className="mb-8 flex items-center gap-3">
           <Logo className="h-10 w-10 rounded-xl" />
           <div>
-            <h1 className="text-xl font-semibold">Set up Autotagarr</h1>
+            <h1 className="text-xl font-semibold">Set up Tagarr</h1>
             <p className="text-sm text-muted-foreground">Four quick steps. Everything can be changed later in Settings.</p>
           </div>
         </div>
@@ -60,7 +60,7 @@ export default function SetupPage() {
         <Card className="p-5 sm:p-7">
           {step === 0 && (
             <>
-              <StepTitle title="Connect Jellyfin" text="Autotagarr reads your movies and shows and writes people's tags onto them." />
+              <StepTitle title="Connect Jellyfin" text="Tagarr reads your movies and shows and writes people's tags onto them." />
               <ConnectionForm service="jellyfin" url={s.jellyfinUrl} keySet={s.jellyfinApiKeySet} saveLabel="Save and continue" onSaved={() => setStep(1)} />
             </>
           )}
@@ -103,7 +103,7 @@ export default function SetupPage() {
           )}
           {step === 3 && (
             <>
-              <StepTitle title="You're set" text="Autotagarr syncs every 15 minutes. Two optional extras make it instant and private:" />
+              <StepTitle title="You're set" text="Tagarr syncs every 15 minutes. Two optional extras make it instant and private:" />
               <div className="space-y-5 text-sm">
                 <div>
                   <h3 className="mb-1.5 font-medium">1. Instant tagging (recommended)</h3>

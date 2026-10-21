@@ -226,3 +226,29 @@ test("the webhook needs its secret", async () => {
   assert.equal(res.statusCode, 200);
   cookie = saved;
 });
+
+test("the Homepage widget needs a key, and revoking one locks it out", async () => {
+  const created = (await api("POST", "/api/widget-keys", { label: "Homepage" })).json;
+  assert.match(created.key, /^tgr_/);
+  const saved = cookie;
+  cookie = "";
+  // Not with a session alone, nor a wrong key.
+  assert.equal((await app.inject({ method: "GET", url: "/api/widget" })).statusCode, 401);
+  assert.equal((await app.inject({ method: "GET", url: "/api/widget", headers: { "x-api-key": "tgr_nope" } })).statusCode, 401);
+  const res = await app.inject({ method: "GET", url: "/api/widget", headers: { "x-api-key": created.key } });
+  assert.equal(res.statusCode, 200);
+  const stats = JSON.parse(res.body);
+  for (const field of ["untagged", "shared", "waiting", "suggestions", "total", "tagged_pct"]) {
+    assert.equal(typeof stats[field], "number", field);
+  }
+  assert.equal(typeof stats.people.Owen, "number");
+  assert.ok(stats.last_sync);
+  cookie = saved;
+  // The key list never includes the key itself, but shows it was used.
+  const keys = (await api("GET", "/api/widget-keys")).json;
+  assert.equal(keys.length, 1);
+  assert.equal(keys[0].key_hash, undefined);
+  assert.ok(keys[0].last_used_at);
+  await api("DELETE", `/api/widget-keys/${created.id}`);
+  assert.equal((await app.inject({ method: "GET", url: "/api/widget", headers: { "x-api-key": created.key } })).statusCode, 401);
+});
