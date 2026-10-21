@@ -21,6 +21,7 @@ interface MockItem {
   SeriesId?: string;
   Overview?: string;
   Genres?: string[];
+  People?: { Name: string; Type: string; Role?: string }[];
 }
 
 interface MockUser {
@@ -146,6 +147,13 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
   }
 
   const byName = (n: string) => [...items.values()].find((i) => i.Name === n)!;
+  // Someone credited twice (director and writer). Real Jellyfin 10.11 answers
+  // 500 when an edit sends a cast like this back, so the mock does too.
+  byName("The Batman").People = [
+    { Name: "Robert Pattinson", Type: "Actor", Role: "Bruce Wayne" },
+    { Name: "Matt Reeves", Type: "Director" },
+    { Name: "Matt Reeves", Type: "Writer" },
+  ];
   const policy = (admin: boolean) => ({ IsAdministrator: admin, AllowedTags: [] as string[], BlockedTags: [] as string[], EnableAllFolders: true });
   const users: MockUser[] = [
     { Id: "u-owen", Name: "owen", Policy: policy(true), played: new Set() },
@@ -237,12 +245,16 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
       if (!item) return send(404);
       if (req.method === "POST") {
         const next = JSON.parse(body) as MockItem;
+        if (next.People) {
+          const names = next.People.map((x) => x.Name);
+          if (new Set(names).size !== names.length) return send(500, "Error processing request.", "text/plain");
+        }
         // Like Jellyfin, an edit replaces the item with what was sent.
         items.set(item.Id, { ...item, ...next, Id: item.Id });
         state.edits++;
         return send(204);
       }
-      return send(200, { ...item, LockedFields: [], People: [], Studios: [] });
+      return send(200, { ...item, LockedFields: [], People: item.People ?? [], Studios: [] });
     }
     send(404, { error: "not implemented in mock" });
   });

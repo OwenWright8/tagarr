@@ -35,3 +35,15 @@ test("login limiter", () => {
   l.reset("1.2.3.4");
   assert.ok(!l.blocked("1.2.3.4"));
 });
+
+test("a repeated error is logged once", async () => {
+  const { openDb, logActivity } = await import("../server/db.ts");
+  const db = openDb(":memory:");
+  for (let i = 0; i < 3; i++) logActivity(db, "error", "Couldn't tag X: 500");
+  logActivity(db, "error", "Couldn't tag Y: 500");
+  logActivity(db, "tagged", "X → Owen");
+  logActivity(db, "tagged", "X → Owen");
+  const rows = db.prepare("SELECT kind, message FROM activity").all() as { kind: string }[];
+  assert.equal(rows.filter((r) => r.kind === "error").length, 2);
+  assert.equal(rows.filter((r) => r.kind === "tagged").length, 2);
+});

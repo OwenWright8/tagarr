@@ -190,7 +190,11 @@ export class Jellyfin {
     const current = item.Tags ?? [];
     const next = applyTagEdit(current, add, remove);
     if (sameTags(current, next)) return current;
-    await this.request("POST", `/Items/${itemId}`, { ...item, Tags: next });
+    // People is left out on purpose: Jellyfin skips people when they're not
+    // sent, but when they are it rewrites the item's whole cast and crew, which
+    // fails (500) on items where someone appears in two roles. Tags never need it.
+    const { People: _people, ...rest } = item;
+    await this.request("POST", `/Items/${itemId}`, { ...rest, Tags: next });
     return next;
   }
 

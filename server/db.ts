@@ -248,6 +248,14 @@ export function logActivity(
   message: string,
   refs: { itemId?: string | null; personId?: number | null } = {},
 ) {
+  // The same failure on every sync would bury everything else: log a repeated
+  // error once, and again only if it's still happening hours later.
+  if (kind === "error") {
+    const recent = db
+      .prepare("SELECT 1 FROM activity WHERE kind = 'error' AND message = ? AND at > ? LIMIT 1")
+      .get(message, Date.now() - 6 * 3_600_000);
+    if (recent) return;
+  }
   db.prepare("INSERT INTO activity (at, kind, message, item_id, person_id) VALUES (?, ?, ?, ?, ?)").run(
     Date.now(),
     kind,

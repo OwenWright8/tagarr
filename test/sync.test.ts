@@ -252,3 +252,13 @@ test("the Homepage widget needs a key, and revoking one locks it out", async () 
   await api("DELETE", `/api/widget-keys/${created.id}`);
   assert.equal((await app.inject({ method: "GET", url: "/api/widget", headers: { "x-api-key": created.key } })).statusCode, 401);
 });
+
+test("tags items whose cast lists someone twice, leaving the cast alone", async () => {
+  const alex = ((await api("GET", "/api/people")).json as { id: number; name: string }[]).find((p) => p.name === "Alex")!;
+  const batman = idOf("The Batman");
+  const before = mock.items.get(batman)!.People;
+  const res = await api("POST", "/api/items/tags", { itemIds: [batman], add: [alex.id] });
+  assert.equal(res.json.ok, 1, JSON.stringify(res.json.failed));
+  assert.ok(tagsOf("The Batman").includes("Alex"));
+  assert.deepEqual(mock.items.get(batman)!.People, before);
+});
