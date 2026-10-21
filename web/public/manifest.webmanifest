@@ -1,0 +1,14 @@
+{
+  "name": "Autotagarr",
+  "short_name": "Autotagarr",
+  "description": "Automatic per-person tags for a shared Jellyfin library",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f6f2",
+  "theme_color": "#7c5cbf",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
