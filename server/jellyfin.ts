@@ -190,11 +190,7 @@ export class Jellyfin {
     const current = item.Tags ?? [];
     const next = applyTagEdit(current, add, remove);
     if (sameTags(current, next)) return current;
-    // People is left out on purpose: Jellyfin skips people when they're not
-    // sent, but when they are it rewrites the item's whole cast and crew, which
-    // fails (500) on items where someone appears in two roles. Tags never need it.
-    const { People: _people, ...rest } = item;
-    await this.request("POST", `/Items/${itemId}`, { ...rest, Tags: next });
+    await this.request("POST", `/Items/${itemId}`, { ...editableFields(item), Tags: next });
     return next;
   }
 
@@ -228,6 +224,29 @@ export class Jellyfin {
       signal: AbortSignal.timeout(30_000),
     });
   }
+}
+
+// The fields Jellyfin's item editor (POST /Items/{id}) reads back, taken from
+// its ItemUpdateController. Sending the whole item fails on fields it can't
+// read back (a 500 on any item with trickplay images: TrickplayInfoDto has no
+// deserialization constructor), and the scalar fields here are overwritten
+// with whatever is sent, so each must be passed through unchanged.
+// People is left out on purpose: when it's absent Jellyfin keeps the cast as
+// it is; when it's sent, Jellyfin rewrites the whole cast and crew.
+const EDITABLE_FIELDS = [
+  "AirDays", "AirTime", "AirsAfterSeasonNumber", "AirsBeforeEpisodeNumber", "AirsBeforeSeasonNumber",
+  "Album", "AlbumArtists", "ArtistItems", "AspectRatio", "CommunityRating", "CriticRating", "CustomRating",
+  "DateCreated", "DisplayOrder", "EndDate", "ForcedSortName", "Genres", "Height", "IndexNumber", "LockData",
+  "LockedFields", "Name", "OfficialRating", "OriginalLanguage", "OriginalTitle", "Overview", "ParentIndexNumber",
+  "PreferredMetadataCountryCode", "PreferredMetadataLanguage", "PremiereDate", "ProductionLocations",
+  "ProductionYear", "ProviderIds", "RunTimeTicks", "SeriesName", "Status", "Studios", "Taglines", "Tags",
+  "Video3DFormat",
+];
+
+export function editableFields(item: JellyfinItem): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of EDITABLE_FIELDS) if (key in item) out[key] = item[key];
+  return out;
 }
 
 export function applyTagEdit(current: string[], add: string[], remove: string[]): string[] {

@@ -47,3 +47,13 @@ test("a repeated error is logged once", async () => {
   assert.equal(rows.filter((r) => r.kind === "error").length, 2);
   assert.equal(rows.filter((r) => r.kind === "tagged").length, 2);
 });
+
+test("tag edits send back only the fields Jellyfin's editor reads", async () => {
+  const { editableFields } = await import("../server/jellyfin.ts");
+  const out = editableFields({
+    Id: "x", Type: "Movie", Name: "Good Boys", Overview: "o", ProductionYear: 2019, Tags: ["A"],
+    ProviderIds: { Tmdb: "1" }, LockedFields: [], People: [{ Name: "Seth" }],
+    Trickplay: { x: {} }, MediaSources: [], UserData: {}, ImageTags: {},
+  });
+  assert.deepEqual(Object.keys(out).sort(), ["LockedFields", "Name", "Overview", "ProductionYear", "ProviderIds", "Tags"]);
+});

@@ -245,6 +245,8 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
       if (!item) return send(404);
       if (req.method === "POST") {
         const next = JSON.parse(body) as MockItem;
+        // Real Jellyfin can't read TrickplayInfoDto back and answers 500.
+        if ("Trickplay" in next) return send(500, "Error processing request.", "text/plain");
         if (next.People) {
           const names = next.People.map((x) => x.Name);
           if (new Set(names).size !== names.length) return send(500, "Error processing request.", "text/plain");
@@ -254,7 +256,16 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
         state.edits++;
         return send(204);
       }
-      return send(200, { ...item, LockedFields: [], People: item.People ?? [], Studios: [] });
+      return send(200, {
+        ...item,
+        LockedFields: [],
+        People: item.People ?? [],
+        Studios: [],
+        // Shaped like the real thing: present on items with trickplay images.
+        Trickplay: { [item.Id]: { "320": { Width: 320, Height: 180, TileWidth: 10, TileHeight: 10, ThumbnailCount: 100, Interval: 10000, Bandwidth: 0 } } },
+        MediaSources: [{ Id: item.Id, Protocol: "File" }],
+        UserData: { Played: false },
+      });
     }
     send(404, { error: "not implemented in mock" });
   });
