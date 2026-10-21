@@ -109,6 +109,18 @@ test("requests are tagged with the requester, existing tags are adopted", async 
   assert.deepEqual(gilmore.people, [{ id: alex.json.id, source: "jellyfin" }]);
 });
 
+test("an ignored Seerr user stops counting as needing a link", async () => {
+  await api("PUT", "/api/settings", { ignoredSeerrUsers: [3] });
+  assert.equal((await api("GET", "/api/overview")).json.totals.unmappedRequests, 0);
+  const jamieReq = (await api("GET", "/api/requests")).json.find((r: { seerrUserId: number }) => r.seerrUserId === 3);
+  assert.equal(jamieReq.state, "ignored");
+  assert.deepEqual(tagsOf("Inside Out 2"), []);
+  assert.deepEqual((await api("GET", "/api/settings")).json.ignoredSeerrUsers, [3]);
+  // Un-ignoring brings the warning back.
+  await api("PUT", "/api/settings", { ignoredSeerrUsers: [] });
+  assert.equal((await api("GET", "/api/overview")).json.totals.unmappedRequests, 1);
+});
+
 test("a request that arrives later is tagged once it's in Jellyfin", async () => {
   const before = (await api("GET", "/api/requests")).json.find((r: { title: string }) => r.title === "The Substance");
   assert.equal(before.state, "waiting");

@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Clock, Inbox, Link2Off, XCircle } from "lucide-react";
-import { get, type RequestEntry } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Clock, EyeOff, Inbox, Link2Off, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { api, get, type RequestEntry, type SettingsData } from "@/lib/api";
 import { PageHeader, useOverview } from "@/components/Layout";
 import { Avatar, Poster, usePeople } from "@/components/people";
 import { Badge, Button, EmptyState, PageSpinner, Segmented, timeAgo } from "@/components/ui";
@@ -12,6 +13,7 @@ const STATE: Record<RequestEntry["state"], { label: string; tone: "success" | "w
   queued: { label: "Tagging next sync", tone: "primary", icon: <Clock className="h-3 w-3" /> },
   waiting: { label: "Not in Jellyfin yet", tone: "neutral", icon: <Clock className="h-3 w-3" /> },
   unlinked: { label: "Requester not linked", tone: "warning", icon: <Link2Off className="h-3 w-3" /> },
+  ignored: { label: "Not tagged (ignored user)", tone: "neutral", icon: <EyeOff className="h-3 w-3" /> },
   declined: { label: "Declined", tone: "danger", icon: <XCircle className="h-3 w-3" /> },
 };
 
@@ -21,6 +23,17 @@ export default function RequestsPage() {
   const requests = useQuery({ queryKey: ["requests"], queryFn: () => get<RequestEntry[]>("/requests"), refetchInterval: 60_000 });
   const [show, setShow] = useState<"all" | "waiting" | "attention">("all");
   const byId = useMemo(() => new Map((people.data ?? []).map((p) => [p.id, p])), [people.data]);
+  const qc = useQueryClient();
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => get<SettingsData>("/settings") });
+  const ignore = useMutation({
+    mutationFn: (ids: number[]) =>
+      api("PUT", "/settings", { ignoredSeerrUsers: [...(settings.data?.ignoredSeerrUsers ?? []), ...ids] }),
+    onSuccess: () => {
+      qc.invalidateQueries();
+      toast.success("Ignored. Their requests won't be tagged. Undo under Settings → People.");
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   if (overview.data && !overview.data.connections.seerr) {
     return (
@@ -37,6 +50,7 @@ export default function RequestsPage() {
   const list = requests.data.filter((r) => (show === "waiting" ? r.state === "waiting" : show === "attention" ? r.state === "unlinked" : true));
   const unlinked = requests.data.filter((r) => r.state === "unlinked");
   const unlinkedNames = [...new Set(unlinked.map((r) => r.requestedBy))];
+  const unlinkedIds = [...new Set(unlinked.map((r) => r.seerrUserId).filter((id): id is number => id != null))];
 
   return (
     <div className="animate-fade-in">
@@ -52,9 +66,14 @@ export default function RequestsPage() {
             <strong>{unlinkedNames.join(", ")}</strong> {unlinkedNames.length === 1 ? "isn't" : "aren't"} linked to a person, so {unlinked.length} request
             {unlinked.length === 1 ? " is" : "s are"} waiting for a tag.
           </span>
-          <Link to="/settings#people" className="font-medium text-primary hover:underline">
-            Link in Settings →
-          </Link>
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => ignore.mutate(unlinkedIds)} loading={ignore.isPending}>
+              <EyeOff className="h-3.5 w-3.5" /> Ignore {unlinkedNames.length === 1 ? unlinkedNames[0] : "them"}
+            </Button>
+            <Link to="/settings#people" className="font-medium text-primary hover:underline">
+              Link in Settings →
+            </Link>
+          </div>
         </div>
       )}
 

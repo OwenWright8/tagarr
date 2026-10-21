@@ -163,6 +163,8 @@ export interface Settings {
   unrequestedAction: "none" | "tag";
   unrequestedPeople: number[];
   unrequestedGraceHours: number;
+  /** Seerr users whose requests are never tagged (e.g. an admin who sees everything). */
+  ignoredSeerrUsers: number[];
   webhookSecret: string;
   adminUsername: string;
   adminPasswordHash: string;
@@ -181,6 +183,7 @@ export const DEFAULT_SETTINGS: Settings = {
   unrequestedAction: "none",
   unrequestedPeople: [],
   unrequestedGraceHours: 24,
+  ignoredSeerrUsers: [],
   webhookSecret: "",
   adminUsername: "",
   adminPasswordHash: "",

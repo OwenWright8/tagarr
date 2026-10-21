@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link2, Pencil, Plus, Trash2, UserPlus, Users } from "lucide-react";
+import { EyeOff, Link2, Pencil, Plus, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
-import { api, get, type Person, type RemoteUsers } from "@/lib/api";
+import { api, get, type Person, type RemoteUsers, type SettingsData } from "@/lib/api";
 import { Avatar, COLORS, usePeople } from "./people";
 import { Badge, Button, EmptyState, Field, Input, Modal, Select, Spinner, cn } from "./ui";
 
@@ -16,6 +16,13 @@ export function PeopleEditor() {
   const remote = useRemoteUsers();
   const [editing, setEditing] = useState<Person | "new" | null>(null);
   const [deleting, setDeleting] = useState<Person | null>(null);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => get<SettingsData>("/settings") });
+  const ignoredIds = settings.data?.ignoredSeerrUsers ?? [];
+  const setIgnored = useMutation({
+    mutationFn: (ids: number[]) => api("PUT", "/settings", { ignoredSeerrUsers: ids }),
+    onSuccess: () => qc.invalidateQueries(),
+    onError: (err) => toast.error(err.message),
+  });
 
   const add = useMutation({
     mutationFn: (body: Partial<Person>) => api("POST", "/people", body),
@@ -32,14 +39,14 @@ export function PeopleEditor() {
     const linked = new Set(people.data.map((p) => p.seerrUserId));
     const tags = new Set(people.data.map((p) => p.tag.toLowerCase()));
     return remote.data.seerr
-      .filter((u) => !linked.has(u.id))
+      .filter((u) => !linked.has(u.id) && !ignoredIds.includes(u.id))
       .map((u) => ({
         ...u,
         jellyfin: remote.data!.jellyfin.find((j) => j.id === u.jellyfinUserId) ?? remote.data!.jellyfin.find((j) => j.name.toLowerCase() === u.name.toLowerCase()),
         // An existing person with the same tag would clash; they can link via Edit instead.
         clash: tags.has(u.name.toLowerCase()),
       }));
-  }, [remote.data, people.data]);
+  }, [remote.data, people.data, ignoredIds]);
 
   if (people.isLoading) return <Spinner />;
   const list = people.data ?? [];
@@ -107,6 +114,16 @@ export function PeopleEditor() {
                   </div>
                 </div>
                 <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  title={`Ignore ${u.name}: their requests are never tagged (e.g. an admin who sees everything)`}
+                  aria-label={`Ignore ${u.name}`}
+                  onClick={() => setIgnored.mutate([...ignoredIds, u.id])}
+                >
+                  <EyeOff className="h-4 w-4" />
+                </Button>
+                <Button
                   size="sm"
                   variant="secondary"
                   loading={add.isPending && add.variables?.seerrUserId === u.id}
@@ -121,6 +138,23 @@ export function PeopleEditor() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {ignoredIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <EyeOff className="h-4 w-4" />
+          <span>Ignored Seerr users (their requests aren't tagged):</span>
+          {ignoredIds.map((id) => (
+            <span key={id} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs">
+              {remote.data?.seerr.find((u) => u.id === id)?.name ?? `User ${id}`}
+              <button
+                className="font-medium text-primary hover:underline"
+                onClick={() => setIgnored.mutate(ignoredIds.filter((x) => x !== id))}
+              >
+                Undo
+              </button>
+            </span>
+          ))}
         </div>
       )}
       {remote.data?.errors.map((e) => (

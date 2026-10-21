@@ -183,8 +183,10 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       pendingRequests: count("SELECT count(*) AS n FROM requests WHERE item_id IS NULL AND status != ?", REQUEST_DECLINED),
       unmappedRequests: count(
         `SELECT count(*) AS n FROM requests r WHERE status != ? AND applied = 0 AND item_id IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM people p WHERE p.seerr_user_id = r.seerr_user_id)`,
+         AND NOT EXISTS (SELECT 1 FROM people p WHERE p.seerr_user_id = r.seerr_user_id)
+         AND coalesce(r.seerr_user_id, -1) NOT IN (SELECT value FROM json_each(?))`,
         REQUEST_DECLINED,
+        JSON.stringify(getSettings(db).ignoredSeerrUsers),
       ),
       suggestions: count("SELECT count(*) AS n FROM suggestions WHERE dismissed = 0"),
     };
@@ -479,6 +481,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
          ORDER BY r.created_at DESC LIMIT 500`,
       )
       .all() as unknown as (RequestRow & { item_name: string | null; item_year: number | null; has_image: number | null; person_id: number | null })[];
+    const ignored = new Set(getSettings(db).ignoredSeerrUsers);
     return rows.map((r) => ({
       id: r.id,
       type: r.media_type,
@@ -496,7 +499,9 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
           : !r.item_id
             ? "waiting"
             : r.person_id == null
-              ? "unlinked"
+              ? r.seerr_user_id != null && ignored.has(r.seerr_user_id)
+                ? "ignored"
+                : "unlinked"
               : r.applied
                 ? "tagged"
                 : "queued",
@@ -582,6 +587,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       unrequestedAction: s.unrequestedAction,
       unrequestedPeople: s.unrequestedPeople,
       unrequestedGraceHours: s.unrequestedGraceHours,
+      ignoredSeerrUsers: s.ignoredSeerrUsers,
       webhookPath: `/api/webhook/${s.webhookSecret}`,
       adminUsername: s.adminUsername,
       setupComplete: s.setupComplete,
@@ -615,6 +621,9 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       const n = Number(body.unrequestedGraceHours);
       if (!Number.isFinite(n) || n < 0 || n > 24 * 365) return reply.code(400).send({ error: "Grace period must be 0 or more hours" });
       patch.unrequestedGraceHours = n;
+    }
+    if (Array.isArray(body.ignoredSeerrUsers)) {
+      patch.ignoredSeerrUsers = [...new Set(body.ignoredSeerrUsers.map(Number).filter(Number.isInteger))];
     }
     if (typeof body.setupComplete === "boolean") patch.setupComplete = body.setupComplete;
     if (body.rotateWebhook === true) patch.webhookSecret = randomSecret();

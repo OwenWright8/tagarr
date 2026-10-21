@@ -119,6 +119,7 @@ export interface SettingsData {
   unrequestedAction: "none" | "tag";
   unrequestedPeople: number[];
   unrequestedGraceHours: number;
+  ignoredSeerrUsers: number[];
   webhookPath: string;
   adminUsername: string;
   setupComplete: boolean;
@@ -135,7 +136,7 @@ export interface RequestEntry {
   createdAt: string | null;
   itemId: string | null;
   hasImage: boolean;
-  state: "waiting" | "unlinked" | "tagged" | "queued" | "declined";
+  state: "waiting" | "unlinked" | "ignored" | "tagged" | "queued" | "declined";
 }
 
 export interface Suggestion {
