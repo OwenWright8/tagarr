@@ -57,3 +57,26 @@ test("tag edits send back only the fields Jellyfin's editor reads", async () => 
   });
   assert.deepEqual(Object.keys(out).sort(), ["LockedFields", "Name", "Overview", "ProductionYear", "ProviderIds", "Tags"]);
 });
+
+test("season windows, yearly and one-off", async () => {
+  const { seasonStatus, checkWindow } = await import("../server/seasons.ts");
+  const halloween = { start_at: "2020-10-01T00:00", end_at: "2020-11-01T00:00", yearly: 1 };
+  assert.equal(seasonStatus(halloween, new Date(2026, 9, 15)).active, true);
+  assert.equal(seasonStatus(halloween, new Date(2026, 10, 1, 0, 0)).active, false); // ends at midnight
+  const off = seasonStatus(halloween, new Date(2026, 10, 2));
+  assert.equal(off.active, false);
+  assert.deepEqual(off.start, new Date(2027, 9, 1)); // next year's start
+  // Wrapping past New Year.
+  const holidays = { start_at: "2020-12-20T18:00", end_at: "2020-01-06T00:00", yearly: 1 };
+  assert.equal(seasonStatus(holidays, new Date(2027, 0, 2)).active, true);
+  assert.deepEqual(seasonStatus(holidays, new Date(2027, 0, 2)).end, new Date(2027, 0, 6));
+  assert.equal(seasonStatus(holidays, new Date(2026, 11, 20, 17, 59)).active, false);
+  assert.equal(seasonStatus(holidays, new Date(2026, 11, 20, 18, 0)).active, true);
+  // One-off: over once it's passed.
+  const once = { start_at: "2026-07-01T09:00", end_at: "2026-07-04T23:00", yearly: 0 };
+  assert.equal(seasonStatus(once, new Date(2026, 6, 2)).active, true);
+  assert.equal(seasonStatus(once, new Date(2026, 6, 5)).over, true);
+  assert.equal(checkWindow("2026-07-04T23:00", "2026-07-01T09:00", false), "The season has to end after it starts");
+  assert.equal(checkWindow("2026-12-20T18:00", "2026-01-06T00:00", true), null);
+  assert.equal(checkWindow("2026-02-30T00:00", "2026-03-01T00:00", true), "Pick when the season starts");
+});

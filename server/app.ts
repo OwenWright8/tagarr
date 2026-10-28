@@ -8,11 +8,15 @@ import {
   type DB,
   type ItemRow,
   type Person,
+  type SeasonRow,
   type Settings,
   getSettings,
   listPeople,
+  listSeasons,
   logActivity,
   saveSettings,
+  seasonPeople,
+  tx,
 } from "./db.ts";
 import {
   LoginLimiter,
@@ -31,6 +35,7 @@ import {
 import { Engine, type RequestRow, errorText } from "./engine.ts";
 import { Jellyfin, hasTag } from "./jellyfin.ts";
 import { REQUEST_DECLINED, Seerr, seerrUserName } from "./seerr.ts";
+import { checkWindow, seasonStatus } from "./seasons.ts";
 import { UpdateChecker, isNewer } from "./update-check.ts";
 
 export interface AppOptions {
@@ -178,7 +183,12 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       items: count("SELECT count(*) AS n FROM items"),
       movies: count("SELECT count(*) AS n FROM items WHERE type = 'Movie'"),
       shows: count("SELECT count(*) AS n FROM items WHERE type = 'Series'"),
-      untagged: count("SELECT count(*) AS n FROM items i WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = i.id)"),
+      // Seasonal titles are untagged on purpose out of season, so they don't count.
+      untagged: count(
+        `SELECT count(*) AS n FROM items i WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = i.id)
+         AND NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)`,
+      ),
+      seasonal: count("SELECT count(DISTINCT item_id) AS n FROM season_items"),
       shared: count("SELECT count(*) AS n FROM (SELECT item_id FROM assignments GROUP BY item_id HAVING count(*) > 1)"),
       pendingRequests: count("SELECT count(*) AS n FROM requests WHERE item_id IS NULL AND status != ?", REQUEST_DECLINED),
       unmappedRequests: count(
@@ -207,6 +217,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     return {
       connections: { jellyfin: !!(s.jellyfinUrl && s.jellyfinApiKey), seerr: !!(s.seerrUrl && s.seerrApiKey) },
       totals: totals(),
+      seasons: listSeasons(db).map(publicSeason),
       people: perPerson,
       activity,
       sync: engine.status,
@@ -283,7 +294,9 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       args.push(`%${q.trim().replace(/[\\%_]/g, (c) => "\\" + c)}%`);
     }
     const assignedCount = "(SELECT count(*) FROM assignments a WHERE a.item_id = i.id)";
-    if (filter === "untagged") where.push(`${assignedCount} = 0`);
+    const seasonal = "EXISTS (SELECT 1 FROM season_items si WHERE si.item_id = i.id)";
+    if (filter === "untagged") where.push(`${assignedCount} = 0 AND NOT ${seasonal}`);
+    else if (filter === "seasonal") where.push(seasonal);
     else if (filter === "shared") where.push(`${assignedCount} > 1`);
     else if (filter === "suggested") where.push("EXISTS (SELECT 1 FROM suggestions s WHERE s.item_id = i.id AND s.dismissed = 0)");
     else if (filter.startsWith("person:")) {
@@ -314,6 +327,10 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       .prepare(`SELECT item_id, requested_by FROM requests WHERE status != ? AND item_id IN (${marks})`)
       .all(REQUEST_DECLINED, ...ids) as { item_id: string; requested_by: string }[];
     const people = listPeople(db);
+    const inSeasons = db
+      .prepare(`SELECT si.item_id, s.* FROM season_items si JOIN seasons s ON s.id = si.season_id WHERE si.item_id IN (${marks})`)
+      .all(...ids) as unknown as (SeasonRow & { item_id: string })[];
+    const now = new Date();
     return rows.map((r) => {
       const mine = assigns.filter((a) => a.item_id === r.id);
       const tags = JSON.parse(r.tags) as string[];
@@ -328,6 +345,9 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
         suggested: suggestions.filter((s) => s.item_id === r.id).map((s) => s.person_id),
         requestedBy: [...new Set(requests.filter((q) => q.item_id === r.id).map((q) => q.requested_by))],
         otherTags: tags.filter((t) => !people.some((p) => p.tag.toLowerCase() === t.toLowerCase())),
+        seasons: inSeasons
+          .filter((x) => x.item_id === r.id)
+          .map((x) => ({ id: x.id, name: x.name, active: seasonStatus(x, now).active, people: seasonPeople(x) })),
       };
     });
   }
@@ -467,6 +487,177 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       }
     }
     return out;
+  });
+
+  // --- Seasons ----------------------------------------------------------------------------
+  // A season shows a set of titles to some people between two dates (every
+  // year, or once) and hides them the rest of the time; see engine.applySeasons.
+
+  function publicSeason(row: SeasonRow) {
+    const st = seasonStatus(row);
+    const n = count("SELECT count(*) AS n FROM season_items WHERE season_id = ?", row.id);
+    return {
+      id: row.id,
+      name: row.name,
+      start: row.start_at,
+      end: row.end_at,
+      yearly: !!row.yearly,
+      people: seasonPeople(row),
+      collection: !!row.collection,
+      collectionName: row.collection_name,
+      collectionMade: !!row.collection_id,
+      itemCount: n,
+      status: { active: st.active, over: st.over, start: st.start.toISOString(), end: st.end.toISOString() },
+      applied: row.applied_active === (st.active ? 1 : 0),
+    };
+  }
+
+  const getSeason = (id: number) => db.prepare("SELECT * FROM seasons WHERE id = ?").get(id) as unknown as SeasonRow | undefined;
+  const seasonItemIds = (id: number) =>
+    (db.prepare("SELECT item_id FROM season_items WHERE season_id = ?").all(id) as { item_id: string }[]).map((r) => r.item_id);
+
+  /** Validates a season body against the current row (for edits). */
+  function readSeason(body: SeasonBody, current?: SeasonRow): { error: string } | { value: Omit<SeasonRow, "id" | "created_at" | "collection_id" | "applied_active">; itemIds?: string[] } {
+    const name = body.name !== undefined ? String(body.name).trim() : (current?.name ?? "");
+    if (!name) return { error: "Give the season a name" };
+    if (name.length > 100) return { error: "That name is too long" };
+    const start = body.start !== undefined ? String(body.start) : (current?.start_at ?? "");
+    const end = body.end !== undefined ? String(body.end) : (current?.end_at ?? "");
+    const yearly = body.yearly !== undefined ? !!body.yearly : current ? !!current.yearly : true;
+    const problem = checkWindow(start, end, yearly);
+    if (problem) return { error: problem };
+    const known = new Set(listPeople(db).map((p) => p.id));
+    const people = body.people !== undefined ? arrayOf(body.people, "number").filter((id) => known.has(id)) : current ? seasonPeople(current) : [];
+    const collection = body.collection !== undefined ? !!body.collection : !!current?.collection;
+    const collectionName =
+      body.collectionName !== undefined ? String(body.collectionName ?? "").trim().slice(0, 100) || null : (current?.collection_name ?? null);
+    let itemIds: string[] | undefined;
+    if (body.itemIds !== undefined) {
+      const ids = [...new Set(arrayOf(body.itemIds, "string"))].slice(0, 5000);
+      const marks = ids.map(() => "?").join(",");
+      itemIds = ids.length ? (db.prepare(`SELECT id FROM items WHERE id IN (${marks})`).all(...ids) as { id: string }[]).map((r) => r.id) : [];
+    }
+    return {
+      value: {
+        name,
+        start_at: start,
+        end_at: end,
+        yearly: yearly ? 1 : 0,
+        people: JSON.stringify([...new Set(people)]),
+        collection: collection ? 1 : 0,
+        collection_name: collectionName,
+      },
+      itemIds,
+    };
+  }
+
+  /** Puts items that are now in no season back to their usual tags, then syncs. */
+  async function afterSeasonChange(released: string[], reason: string) {
+    const free = released.filter((id) => engine.seasonsOf(id).length === 0);
+    if (free.length) await engine.releaseItems(free);
+    engine.poke(reason);
+  }
+
+  app.get("/api/seasons", async () => listSeasons(db).map(publicSeason));
+
+  app.get<{ Params: { id: string } }>("/api/seasons/:id", async (req, reply) => {
+    const row = getSeason(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: "No such season" });
+    const items = db
+      .prepare(
+        `SELECT i.* FROM season_items si JOIN items i ON i.id = si.item_id WHERE si.season_id = ?
+         ORDER BY i.sort_name COLLATE NOCASE`,
+      )
+      .all(row.id) as unknown as ItemRow[];
+    return { ...publicSeason(row), items: items.map((i) => ({ id: i.id, name: i.name, year: i.year, type: i.type, hasImage: !!i.has_image })) };
+  });
+
+  app.post<{ Body: SeasonBody }>("/api/seasons", async (req, reply) => {
+    const read = readSeason(req.body ?? {});
+    if ("error" in read) return reply.code(400).send({ error: read.error });
+    const v = read.value;
+    const id = tx(db, () => {
+      const res = db
+        .prepare(
+          `INSERT INTO seasons (name, start_at, end_at, yearly, people, collection, collection_name, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, Date.now());
+      const id = Number(res.lastInsertRowid);
+      const add = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) VALUES (?, ?)");
+      for (const itemId of read.itemIds ?? []) add.run(id, itemId);
+      return id;
+    });
+    logActivity(db, "season", `Added the ${v.name} season (${plural(read.itemIds?.length ?? 0, "title")})`);
+    engine.poke("season added");
+    return { id };
+  });
+
+  app.patch<{ Params: { id: string }; Body: SeasonBody }>("/api/seasons/:id", async (req, reply) => {
+    const row = getSeason(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: "No such season" });
+    const read = readSeason(req.body ?? {}, row);
+    if ("error" in read) return reply.code(400).send({ error: read.error });
+    const v = read.value;
+    const before = seasonItemIds(row.id);
+    // Turning the collection off removes the one Tagarr made: left behind it
+    // would keep whatever tags it last had.
+    if (row.collection_id && !v.collection) {
+      try {
+        await engine.deleteCollection(row.collection_id);
+      } catch (err) {
+        return reply.code(502).send({ error: `Couldn't delete the collection in Jellyfin: ${errorText(err)}` });
+      }
+    }
+    tx(db, () => {
+      db.prepare(
+        `UPDATE seasons SET name = ?, start_at = ?, end_at = ?, yearly = ?, people = ?, collection = ?, collection_name = ?,
+         collection_id = CASE WHEN ? THEN collection_id ELSE NULL END WHERE id = ?`,
+      ).run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, v.collection, row.id);
+      if (read.itemIds) {
+        db.prepare("DELETE FROM season_items WHERE season_id = ?").run(row.id);
+        const add = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) VALUES (?, ?)");
+        for (const itemId of read.itemIds) add.run(row.id, itemId);
+      }
+    });
+    const after = new Set(seasonItemIds(row.id));
+    await afterSeasonChange(before.filter((id) => !after.has(id)), "season changed");
+    return publicSeason(getSeason(row.id)!);
+  });
+
+  /** Adds or removes titles without sending the whole list (bulk actions in the library). */
+  app.post<{ Params: { id: string }; Body: { add?: string[]; remove?: string[] } }>("/api/seasons/:id/items", async (req, reply) => {
+    const row = getSeason(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: "No such season" });
+    const add = arrayOf(req.body?.add, "string").slice(0, 5000);
+    const remove = arrayOf(req.body?.remove, "string").slice(0, 5000);
+    let added = 0;
+    tx(db, () => {
+      const ins = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) SELECT ?, id FROM items WHERE id = ?");
+      for (const id of add) added += Number(ins.run(row.id, id).changes);
+      const del = db.prepare("DELETE FROM season_items WHERE season_id = ? AND item_id = ?");
+      for (const id of remove) del.run(row.id, id);
+    });
+    if (added) logActivity(db, "season", `Added ${plural(added, "title")} to ${row.name}`);
+    await afterSeasonChange(remove, "season changed");
+    return { ok: true, added };
+  });
+
+  app.delete<{ Params: { id: string }; Querystring: { keepCollection?: string } }>("/api/seasons/:id", async (req, reply) => {
+    const row = getSeason(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: "No such season" });
+    if (row.collection_id && req.query.keepCollection !== "1") {
+      try {
+        await engine.deleteCollection(row.collection_id);
+      } catch (err) {
+        return reply.code(502).send({ error: `Couldn't delete the collection in Jellyfin: ${errorText(err)}` });
+      }
+    }
+    const items = seasonItemIds(row.id);
+    db.prepare("DELETE FROM seasons WHERE id = ?").run(row.id);
+    logActivity(db, "season", `Removed the ${row.name} season`);
+    await afterSeasonChange(items, "season removed");
+    return { ok: true };
   });
 
   // --- Requests & suggestions ----------------------------------------------------------
@@ -761,6 +952,21 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
   }
 
   return { app, engine, updates };
+}
+
+interface SeasonBody {
+  name?: string;
+  start?: string;
+  end?: string;
+  yearly?: boolean;
+  people?: number[];
+  collection?: boolean;
+  collectionName?: string | null;
+  itemIds?: string[];
+}
+
+function plural(n: number, word: string) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 interface PersonBody {

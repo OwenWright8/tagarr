@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, RefreshCw, ShieldCheck, Tag, TagsIcon, Undo2 } from "lucide-react";
+import { AlertCircle, CalendarRange, RefreshCw, ShieldCheck, Tag, TagsIcon, Undo2 } from "lucide-react";
 import { get, type Activity } from "@/lib/api";
 import { PageHeader } from "@/components/Layout";
 import { Card, CardBody, PageSpinner, cn, timeAgo } from "@/components/ui";
@@ -10,6 +10,7 @@ const ICON: Record<Activity["kind"], { icon: React.ReactNode; className: string 
   adopted: { icon: <TagsIcon className="h-3.5 w-3.5" />, className: "bg-muted text-muted-foreground" },
   sync: { icon: <RefreshCw className="h-3.5 w-3.5" />, className: "bg-success/10 text-success" },
   access: { icon: <ShieldCheck className="h-3.5 w-3.5" />, className: "bg-accent/10 text-accent" },
+  season: { icon: <CalendarRange className="h-3.5 w-3.5" />, className: "bg-warning/15 text-warning" },
   error: { icon: <AlertCircle className="h-3.5 w-3.5" />, className: "bg-destructive/10 text-destructive" },
 };
 
@@ -38,7 +39,7 @@ export default function ActivityPage() {
   if (!activity.data) return <PageSpinner />;
   return (
     <div className="animate-fade-in">
-      <PageHeader title="Activity" description="Every tag Tagarr wrote or removed, requests it matched, and anything that went wrong." />
+      <PageHeader title="Activity" description="Every tag Tagarr wrote or removed, requests it matched, seasons starting and ending, and anything that went wrong." />
       <Card>
         <CardBody>
           <ActivityList entries={activity.data} empty="Nothing has happened yet." />

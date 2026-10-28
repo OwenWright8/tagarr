@@ -113,6 +113,33 @@ const MIGRATIONS: string[] = [
     last_used_at INTEGER
   );
   `,
+  `
+  -- Seasonal titles: between start_at and end_at (local time, "YYYY-MM-DDTHH:mm";
+  -- the year is ignored when yearly = 1) the season's items are tagged for its
+  -- people, and outside it they carry nobody's tag. While an item is in a
+  -- season, the season decides its people tags; its assignments are kept for
+  -- when it leaves the season.
+  CREATE TABLE seasons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    yearly INTEGER NOT NULL DEFAULT 1,
+    people TEXT NOT NULL DEFAULT '[]',   -- JSON: person ids who see it in season
+    collection INTEGER NOT NULL DEFAULT 0, -- keep a Jellyfin collection of the items
+    collection_name TEXT,
+    collection_id TEXT,                  -- the Jellyfin collection, once made
+    applied_active INTEGER,              -- in season at the last apply (null: never applied)
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE season_items (
+    season_id INTEGER NOT NULL REFERENCES seasons (id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+    PRIMARY KEY (season_id, item_id)
+  );
+  CREATE INDEX season_items_item ON season_items (item_id);
+  `,
 ];
 
 export function openDb(file: string): DB {
@@ -239,6 +266,33 @@ export interface ItemRow {
   date_created: string | null;
   has_image: number;
   rule_applied: number;
+}
+
+export interface SeasonRow {
+  id: number;
+  name: string;
+  start_at: string;
+  end_at: string;
+  yearly: number;
+  people: string;
+  collection: number;
+  collection_name: string | null;
+  collection_id: string | null;
+  applied_active: number | null;
+  created_at: number;
+}
+
+export function listSeasons(db: DB): SeasonRow[] {
+  return db.prepare("SELECT * FROM seasons ORDER BY created_at, id").all() as unknown as SeasonRow[];
+}
+
+export function seasonPeople(season: Pick<SeasonRow, "people">): number[] {
+  try {
+    const ids = JSON.parse(season.people);
+    return Array.isArray(ids) ? ids.filter(Number.isInteger) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function listPeople(db: DB): Person[] {

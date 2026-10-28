@@ -1,14 +1,16 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowRight, CircleDashed, Clock, Film, Inbox, Sparkles, Tag, Tags, Tv, UserX, Users } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarRange, CircleDashed, Clock, Film, Inbox, Sparkles, Tag, Tags, Tv, UserX, Users } from "lucide-react";
 import { PageHeader, useOverview } from "@/components/Layout";
 import { Avatar } from "@/components/people";
 import { ActivityList } from "@/pages/Activity";
+import { formatWall } from "@/pages/Seasonal";
 import { Card, CardBody, CardHeader, PageSpinner, cn, timeAgo } from "@/components/ui";
 
 export default function OverviewPage() {
   const overview = useOverview();
   if (!overview.data) return <PageSpinner />;
-  const { totals, people, activity, sync, connections } = overview.data;
+  const { totals, people, activity, sync, connections, seasons } = overview.data;
+  const inSeason = seasons.filter((s) => s.status.active);
   const tagged = totals.items - totals.untagged;
   const pct = totals.items ? Math.round((tagged / totals.items) * 100) : 0;
   const maxCount = Math.max(1, ...people.map((p) => p.count));
@@ -33,6 +35,12 @@ export default function OverviewPage() {
       {sync.ok === false && (
         <Callout tone="danger" icon={<AlertTriangle className="h-4 w-4" />} to="/activity" action="See activity">
           The last sync had problems{sync.error ? `: ${sync.error}` : "."}
+        </Callout>
+      )}
+
+      {inSeason.length > 0 && (
+        <Callout tone="info" icon={<CalendarRange className="h-4 w-4" />} to="/seasonal" action="Seasonal">
+          In season: {inSeason.map((s) => `${s.name} (${s.itemCount} title${s.itemCount === 1 ? "" : "s"}, until ${formatWall(s.end, !s.yearly)})`).join(", ")}.
         </Callout>
       )}
 

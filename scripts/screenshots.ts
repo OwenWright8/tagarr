@@ -171,6 +171,31 @@ try {
         if (mock.users[1].Policy.AllowedTags[0] !== "Alex") throw new Error("policy not saved");
         await shot(p, "access");
       });
+      await step("seasonal", async () => {
+        await p.goto(`${base}/seasonal`);
+        await p.getByRole("button", { name: "New season" }).click();
+        const dialog = p.getByRole("dialog");
+        await dialog.getByRole("button", { name: "Halloween", exact: true }).click();
+        for (const title of ["Coco", "Paddington 2", "Wednesday", "Stranger Things"]) {
+          await dialog.getByPlaceholder("Search your library to add titles").fill(title);
+          const hit = dialog.getByRole("button", { name: new RegExp(`^${title}`) }).first();
+          // Wednesday isn't in Jellyfin yet (only requested), so it can't be picked.
+          if (await hit.waitFor({ timeout: 3000 }).then(() => true, () => false)) await hit.click();
+        }
+        await dialog.getByPlaceholder("Search your library to add titles").fill("");
+        await shot(p, "season-editor");
+        await dialog.getByRole("button", { name: "Add season" }).click();
+        await p.getByRole("heading", { name: "Halloween" }).waitFor();
+        await engine.sync("screenshots");
+        const col = [...mock.items.values()].find((i) => i.Type === "BoxSet");
+        if (col?.Name !== "Halloween" || col.Children?.length !== 3) throw new Error(`collection is ${JSON.stringify(col?.Children)}`);
+        await p.reload();
+        await p.getByText(/3 titles/).waitFor();
+        await shot(p, "seasonal");
+        await p.goto(`${base}/library?filter=seasonal`);
+        await p.getByText("Coco").first().waitFor();
+        await p.locator("a", { hasText: "Halloween" }).first().waitFor();
+      });
       await step("activity", async () => {
         await p.goto(`${base}/activity`);
         await shot(p, "activity");

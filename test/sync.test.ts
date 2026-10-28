@@ -12,6 +12,8 @@ let mock: MockState;
 let app: FastifyInstance;
 let engine: Engine;
 let cookie = "";
+let database: ReturnType<typeof openDb>;
+const db = () => database;
 
 async function api<T = any>(method: string, url: string, body?: unknown): Promise<{ status: number; json: T }> {
   const res = await app.inject({
@@ -30,7 +32,8 @@ const idOf = (name: string) => [...mock.items.values()].find((i) => i.Name === n
 
 before(async () => {
   mock = await startMocks();
-  ({ app, engine } = await buildApp({ db: openDb(":memory:"), version: "v1.0.0", repo: "x/y", updateCheck: false }));
+  database = openDb(":memory:");
+  ({ app, engine } = await buildApp({ db: database, version: "v1.0.0", repo: "x/y", updateCheck: false }));
 });
 
 after(async () => {
@@ -273,4 +276,86 @@ test("tags items whose cast lists someone twice, leaving the cast alone", async 
   assert.equal(res.json.ok, 1, JSON.stringify(res.json.failed));
   assert.ok(tagsOf("The Batman").includes("Alex"));
   assert.deepEqual(mock.items.get(batman)!.People, before);
+});
+
+test("seasons show titles only in season, and keep a collection that hides with them", async () => {
+  const people = (await api("GET", "/api/people")).json as { id: number; name: string }[];
+  const alex = people.find((p) => p.name === "Alex")!;
+  const local = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const day = 86_400_000;
+  const inSeason = { start: local(new Date(Date.now() - day)), end: local(new Date(Date.now() + day)), yearly: false };
+  const outOfSeason = { start: local(new Date(Date.now() + 20 * day)), end: local(new Date(Date.now() + 30 * day)), yearly: false };
+  const collection = () => [...mock.items.values()].find((i) => i.Type === "BoxSet");
+  const alexSeesCollection = async () => {
+    const res = await fetch(`${mock.jellyfinUrl}/Items?userId=u-alex&IncludeItemTypes=BoxSet`, {
+      headers: { Authorization: `MediaBrowser Token="${JELLYFIN_KEY}"` },
+    });
+    return ((await res.json()) as { Items: unknown[] }).Items.length > 0;
+  };
+  const before = { coco: [...tagsOf("Coco")].sort(), paddington: [...tagsOf("Paddington 2")].sort() };
+
+  assert.equal((await api("POST", "/api/seasons", { name: "Halloween", start: "2026-10-01T00:00", end: "2026-10-01T00:00" })).status, 400);
+  const created = await api("POST", "/api/seasons", {
+    name: "Halloween",
+    ...inSeason,
+    people: [alex.id],
+    collection: true,
+    itemIds: [idOf("Coco"), idOf("Paddington 2")],
+  });
+  assert.equal(created.status, 200);
+  const id = created.json.id;
+  await engine.sync("test");
+  assert.equal(engine.status.ok, true, engine.status.error ?? "");
+
+  // In season: only the season's people, whoever else they belong to.
+  assert.deepEqual(tagsOf("Coco"), ["Alex"]);
+  assert.deepEqual(tagsOf("Paddington 2"), ["Alex"]);
+  assert.equal(collection()?.Name, "Halloween");
+  assert.deepEqual(collection()?.Children?.sort(), [idOf("Coco"), idOf("Paddington 2")].sort());
+  assert.deepEqual(collection()?.Tags, ["Alex"]);
+  assert.equal(await alexSeesCollection(), true);
+  const season = (await api("GET", `/api/seasons/${id}`)).json;
+  assert.equal(season.status.active, true);
+  assert.equal(season.items.length, 2);
+
+  // The season decides: tagging by hand is refused, and the library says why.
+  const manual = await api("POST", "/api/items/tags", { itemIds: [idOf("Coco")], add: [people[0].id] });
+  assert.equal(manual.json.ok, 0);
+  assert.match(manual.json.failed[0].error, /Halloween season/);
+  const coco = (await api("GET", "/api/items?q=coco")).json.items[0];
+  assert.deepEqual(coco.seasons.map((s: { name: string; active: boolean }) => [s.name, s.active]), [["Halloween", true]]);
+
+  // Out of season: hidden from everyone, collection included, and not counted as untagged.
+  await api("PATCH", `/api/seasons/${id}`, outOfSeason);
+  await engine.sync("test");
+  assert.deepEqual(tagsOf("Coco"), []);
+  assert.deepEqual(tagsOf("Paddington 2"), []);
+  assert.deepEqual(collection()?.Tags, []);
+  assert.equal(await alexSeesCollection(), false);
+  const untagged = (await api("GET", "/api/items?filter=untagged&limit=500")).json.items.map((i: { name: string }) => i.name);
+  assert.ok(!untagged.includes("Coco"));
+  assert.equal((await api("GET", "/api/items?filter=seasonal")).json.total, 2);
+  assert.ok((await api("GET", "/api/activity")).json.some((a: { message: string }) => /Halloween is out of season/.test(a.message)));
+  // Nothing is due until it starts again.
+  assert.equal(engine.checkSeasons(), false);
+
+  // The minute check notices a season starting without waiting for the next sync.
+  db().prepare("UPDATE seasons SET start_at = ?, end_at = ? WHERE id = ?").run(inSeason.start, inSeason.end, id);
+  assert.equal(engine.checkSeasons(), true);
+  await engine.sync("test");
+  assert.deepEqual(tagsOf("Coco"), ["Alex"]);
+
+  // Taken out of the season, a title goes back to who it belongs to.
+  await api("POST", `/api/seasons/${id}/items`, { remove: [idOf("Coco")] });
+  assert.deepEqual([...tagsOf("Coco")].sort(), before.coco);
+  await engine.sync("test");
+  assert.deepEqual(collection()?.Children, [idOf("Paddington 2")]);
+
+  // Deleting the season deletes its collection and restores the rest.
+  await api("DELETE", `/api/seasons/${id}`);
+  assert.equal(collection(), undefined);
+  assert.deepEqual([...tagsOf("Paddington 2")].sort(), before.paddington);
 });

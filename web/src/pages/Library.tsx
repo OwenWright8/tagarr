@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, CheckSquare, CircleDashed, LayoutGrid, List, Minus, Plus, Search, Sparkles, Square, Tags, X } from "lucide-react";
+import { CalendarRange, Check, CheckSquare, CircleDashed, LayoutGrid, List, Minus, Plus, Search, Sparkles, Square, Tags, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, get, type Item, type Person } from "@/lib/api";
 import { PageHeader, useOverview } from "@/components/Layout";
 import { Avatar, Poster, usePeople } from "@/components/people";
 import { Badge, Button, EmptyState, Input, Modal, PageSpinner, Segmented, Select, cn } from "@/components/ui";
+import { formatWall, useSeasons } from "@/pages/Seasonal";
 
 const PAGE = 120;
 
@@ -113,6 +114,7 @@ export default function LibraryPage() {
     { value: "all", label: "All", count: overview.data?.totals.items },
     { value: "untagged", label: <><CircleDashed className="h-3.5 w-3.5" /> Untagged</>, count: overview.data?.totals.untagged },
     { value: "shared", label: <><Tags className="h-3.5 w-3.5" /> Shared</>, count: overview.data?.totals.shared },
+    ...(overview.data?.totals.seasonal ? [{ value: "seasonal", label: <><CalendarRange className="h-3.5 w-3.5" /> Seasonal</>, count: overview.data.totals.seasonal }] : []),
     ...(overview.data?.totals.suggestions ? [{ value: "suggested", label: <><Sparkles className="h-3.5 w-3.5" /> Suggested</> }] : []),
     ...(people.data ?? []).map((p) => ({
       value: `person:${p.id}`,
@@ -133,10 +135,17 @@ export default function LibraryPage() {
         title="Library"
         description="Click a person's face under a title to tag or untag it for them. Select several to tag in bulk."
         actions={
-          <Button variant={selecting_ ? "secondary" : "outline"} size="sm" onClick={() => (selecting_ ? (setSelecting(false), setSelected(new Set())) : setSelecting(true))}>
-            {selecting_ ? <X className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
-            {selecting_ ? "Done selecting" : "Select"}
-          </Button>
+          <>
+            <Link to="/seasonal" className="lg:hidden">
+              <Button variant="outline" size="sm">
+                <CalendarRange className="h-4 w-4" /> Seasonal
+              </Button>
+            </Link>
+            <Button variant={selecting_ ? "secondary" : "outline"} size="sm" onClick={() => (selecting_ ? (setSelecting(false), setSelected(new Set())) : setSelecting(true))}>
+              {selecting_ ? <X className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
+              {selecting_ ? "Done selecting" : "Select"}
+            </Button>
+          </>
         }
       />
 
@@ -258,7 +267,29 @@ export default function LibraryPage() {
   );
 }
 
+function SeasonPill({ item, size = "sm" }: { item: Item; size?: "sm" | "md" }) {
+  const active = item.seasons.find((s) => s.active);
+  const s = active ?? item.seasons[0];
+  return (
+    <Link
+      to="/seasonal"
+      onClick={(e) => e.stopPropagation()}
+      title={active ? `${s.name}: in season now` : `${s.name}: hidden until it's in season`}
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 rounded-full font-medium",
+        size === "sm" ? "h-6 px-2 text-[11px]" : "h-8 px-3 text-xs",
+        active ? "bg-success/10 text-success" : "bg-muted text-muted-foreground",
+      )}
+    >
+      <CalendarRange className="h-3 w-3 shrink-0" />
+      <span className="truncate">{s.name}</span>
+      {item.seasons.length > 1 && <span className="opacity-70">+{item.seasons.length - 1}</span>}
+    </Link>
+  );
+}
+
 function PersonToggles({ item, people, onToggle, size = "sm" }: { item: Item; people: Person[]; onToggle: (p: Person) => void; size?: "sm" | "md" }) {
+  if (item.seasons.length) return <SeasonPill item={item} size={size} />;
   return (
     <div className="flex flex-wrap gap-1">
       {people.map((p) => {
@@ -308,7 +339,7 @@ function PosterCard({
   onOpen: () => void;
   onToggle: (p: Person) => void;
 }) {
-  const untagged = item.people.length === 0;
+  const untagged = item.people.length === 0 && !item.seasons.length;
   return (
     <div className={cn("group relative overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md", selected && "ring-2 ring-primary")}>
       <button onClick={onOpen} className="block w-full text-left">
@@ -373,7 +404,7 @@ function ListRow({
           </div>
         </div>
       </button>
-      {item.people.length === 0 && <Badge tone="warning">Untagged</Badge>}
+      {item.people.length === 0 && !item.seasons.length && <Badge tone="warning">Untagged</Badge>}
       <PersonToggles item={item} people={people} onToggle={onToggle} size="md" />
     </div>
   );
@@ -385,9 +416,10 @@ function ItemModal({ item, people, onClose, onToggle }: { item: Item; people: Pe
       <div className="flex gap-5">
         <Poster itemId={item.id} hasImage={item.hasImage} name={item.name} type={item.type} className="hidden aspect-[2/3] w-36 shrink-0 rounded-xl sm:block" />
         <div className="min-w-0 flex-1 space-y-5">
+          {item.seasons.length > 0 && <SeasonNote item={item} people={people} />}
           <div>
-            <h3 className="mb-2 text-sm font-medium">Who it's for</h3>
-            <div className="space-y-2">
+            <h3 className="mb-2 text-sm font-medium">{item.seasons.length ? "Who it's for out of the season" : "Who it's for"}</h3>
+            <div className={cn("space-y-2", item.seasons.length > 0 && "pointer-events-none opacity-50")} aria-disabled={item.seasons.length > 0}>
               {people.map((p) => {
                 const assignment = item.people.find((x) => x.id === p.id);
                 const suggested = item.suggested.includes(p.id);
@@ -440,6 +472,67 @@ function ItemModal({ item, people, onClose, onToggle }: { item: Item; people: Pe
   );
 }
 
+function SeasonNote({ item, people }: { item: Item; people: Person[] }) {
+  const seasons = useSeasons();
+  return (
+    <div className="space-y-2 rounded-xl border border-success/25 bg-success/5 px-4 py-3 text-sm">
+      {item.seasons.map((s) => {
+        const full = seasons.data?.find((x) => x.id === s.id);
+        const who = people.filter((p) => s.people.includes(p.id)).map((p) => p.name);
+        return (
+          <p key={s.id}>
+            <CalendarRange className="-mt-0.5 mr-1.5 inline h-4 w-4 text-success" />
+            In the <strong>{s.name}</strong> season: shows for {who.length ? who.join(", ") : "nobody"}
+            {full && (
+              <>
+                {" "}
+                from {formatWall(full.start, !full.yearly)} to {formatWall(full.end, !full.yearly)}
+                {full.yearly ? " each year" : ""}
+              </>
+            )}
+            , hidden the rest of the time.
+          </p>
+        );
+      })}
+      <p className="text-xs text-muted-foreground">
+        The season decides who sees it. <Link to="/seasonal" className="font-medium text-primary hover:underline">Edit it on the Seasonal page</Link>; taken out of the season, it goes back to the people below.
+      </p>
+    </div>
+  );
+}
+
+function AddToSeason({ ids, onDone }: { ids: string[]; onDone: () => void }) {
+  const seasons = useSeasons();
+  const qc = useQueryClient();
+  const add = useMutation({
+    mutationFn: (seasonId: number) => api<{ added: number }>("POST", `/seasons/${seasonId}/items`, { add: ids }),
+    onSuccess: (res, seasonId) => {
+      const name = seasons.data?.find((s) => s.id === seasonId)?.name ?? "the season";
+      toast.success(`Added ${res.added} title${res.added === 1 ? "" : "s"} to ${name}`);
+      qc.invalidateQueries();
+      onDone();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  if (!seasons.data?.length) return null;
+  return (
+    <Select
+      value=""
+      onChange={(e) => e.target.value && add.mutate(Number(e.target.value))}
+      disabled={add.isPending}
+      className="h-8 w-auto text-[13px]"
+      aria-label="Add to a season"
+    >
+      <option value="">Add to season…</option>
+      {seasons.data.map((s) => (
+        <option key={s.id} value={s.id}>
+          {s.name}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
 function BulkBar({ ids, people, onDone }: { ids: string[]; people: Person[]; onDone: () => void }) {
   const tagMut = useTagMutation();
   const run = (add: number[], remove: number[]) =>
@@ -481,6 +574,7 @@ function BulkBar({ ids, people, onDone }: { ids: string[]; people: Person[]; onD
           <Button size="sm" onClick={() => run(people.map((p) => p.id), [])} loading={tagMut.isPending}>
             Everyone
           </Button>
+          <AddToSeason ids={ids} onDone={onDone} />
         </div>
       </div>
     </div>

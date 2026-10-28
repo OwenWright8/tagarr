@@ -194,6 +194,69 @@ export class Jellyfin {
     return next;
   }
 
+  async rename(itemId: string, name: string) {
+    const item = await this.getItem(itemId);
+    if (item.Name === name) return;
+    await this.request("POST", `/Items/${itemId}`, { ...editableFields(item), Name: name });
+  }
+
+  // --- Collections (BoxSets) ---
+
+  /** The collection with exactly this name, if there is one. */
+  async findCollection(name: string): Promise<JellyfinItem | null> {
+    const userId = await this.getAdminUserId();
+    const q = new URLSearchParams({ userId, Recursive: "true", IncludeItemTypes: "BoxSet", SearchTerm: name, EnableImages: "false" });
+    const page = await this.request<{ Items: JellyfinItem[] }>("GET", `/Items?${q}`);
+    return page.Items.find((i) => i.Name.toLowerCase() === name.toLowerCase()) ?? null;
+  }
+
+  async createCollection(name: string, itemIds: string[]): Promise<string> {
+    const q = new URLSearchParams({ Name: name, Ids: itemIds.slice(0, 50).join(",") });
+    const res = await this.request<{ Id: string }>("POST", `/Collections?${q}`);
+    if (itemIds.length > 50) await this.addToCollection(res.Id, itemIds.slice(50));
+    return res.Id;
+  }
+
+  /** The collection itself, or null when it's been deleted. */
+  async getCollection(collectionId: string): Promise<JellyfinItem | null> {
+    try {
+      return await this.getItem(collectionId);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /** Ids of what's in a collection. */
+  async collectionItems(collectionId: string): Promise<string[]> {
+    const userId = await this.getAdminUserId();
+    const q = new URLSearchParams({ userId, ParentId: collectionId, EnableImages: "false", EnableUserData: "false" });
+    const page = await this.request<{ Items: JellyfinItem[] }>("GET", `/Items?${q}`);
+    return page.Items.map((i) => i.Id);
+  }
+
+  async addToCollection(collectionId: string, itemIds: string[]) {
+    for (let i = 0; i < itemIds.length; i += 50) {
+      await this.request("POST", `/Collections/${collectionId}/Items?Ids=${itemIds.slice(i, i + 50).join(",")}`);
+    }
+  }
+
+  async removeFromCollection(collectionId: string, itemIds: string[]) {
+    for (let i = 0; i < itemIds.length; i += 50) {
+      await this.request("DELETE", `/Collections/${collectionId}/Items?Ids=${itemIds.slice(i, i + 50).join(",")}`);
+    }
+  }
+
+  /** Deletes an item from Jellyfin. Only used for collections Tagarr made. */
+  async deleteItem(itemId: string) {
+    try {
+      await this.request("DELETE", `/Items/${itemId}`);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) return;
+      throw err;
+    }
+  }
+
   /** Seasons and episodes under a series (for tagChildren). */
   async children(seriesId: string): Promise<JellyfinItem[]> {
     const userId = await this.getAdminUserId();

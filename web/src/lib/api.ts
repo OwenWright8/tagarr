@@ -59,6 +59,28 @@ export interface Item {
   suggested: number[];
   requestedBy: string[];
   otherTags: string[];
+  seasons: { id: number; name: string; active: boolean; people: number[] }[];
+}
+
+export interface Season {
+  id: number;
+  name: string;
+  /** Server-local wall time, "YYYY-MM-DDTHH:mm" (the year is ignored when yearly). */
+  start: string;
+  end: string;
+  yearly: boolean;
+  people: number[];
+  collection: boolean;
+  collectionName: string | null;
+  collectionMade: boolean;
+  itemCount: number;
+  /** The current window, or the next one. */
+  status: { active: boolean; over: boolean; start: string; end: string };
+  applied: boolean;
+}
+
+export interface SeasonDetail extends Season {
+  items: { id: string; name: string; year: number | null; type: "Movie" | "Series"; hasImage: boolean }[];
 }
 
 export interface SyncStatus {
@@ -75,6 +97,7 @@ export interface SyncStatus {
     adopted: number;
     fromRequests: number;
     fromRule: number;
+    seasonal: number;
     pendingRequests: number;
     suggestions: number;
     errors: number;
@@ -84,7 +107,7 @@ export interface SyncStatus {
 export interface Activity {
   id: number;
   at: number;
-  kind: "tagged" | "untagged" | "adopted" | "error" | "sync" | "access";
+  kind: "tagged" | "untagged" | "adopted" | "error" | "sync" | "access" | "season";
   message: string;
   item_id: string | null;
   person_id: number | null;
@@ -97,11 +120,13 @@ export interface Overview {
     movies: number;
     shows: number;
     untagged: number;
+    seasonal: number;
     shared: number;
     pendingRequests: number;
     unmappedRequests: number;
     suggestions: number;
   };
+  seasons: Season[];
   people: (Person & { count: number; onlyCount: number })[];
   activity: Activity[];
   sync: SyncStatus;

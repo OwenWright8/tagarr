@@ -11,6 +11,7 @@ import LibraryPage from "@/pages/Library";
 import RequestsPage from "@/pages/Requests";
 import SuggestionsPage from "@/pages/Suggestions";
 import AccessPage from "@/pages/Access";
+import SeasonalPage from "@/pages/Seasonal";
 import ActivityPage from "@/pages/Activity";
 import SettingsPage from "@/pages/Settings";
 
@@ -41,6 +42,7 @@ export default function App() {
       <Route element={<Layout onSignOut={signOut} />}>
         <Route index element={<OverviewPage />} />
         <Route path="library" element={<LibraryPage />} />
+        <Route path="seasonal" element={<SeasonalPage />} />
         <Route path="requests" element={<RequestsPage />} />
         <Route path="suggestions" element={<SuggestionsPage />} />
         <Route path="access" element={<AccessPage />} />

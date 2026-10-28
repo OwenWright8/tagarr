@@ -33,6 +33,7 @@ Tagarr does the tagging for you.
 - **Nothing gets lost.** Untagged titles are front and centre, watch history suggests who something belongs to, and an optional rule hands unrequested items to whoever you choose.
 - **Tags stay put.** Tagarr keeps its own record and quietly puts back any tag a metadata refresh wipes.
 - **One-click tagging.** Every poster has each person's face under it: click to add or remove. Select a whole row to tag in bulk.
+- **Seasonal titles.** Halloween movies from Oct 1 to Nov 1, Christmas films in December: pick the titles and who gets them, and they appear and disappear on their own every year, with a Jellyfin collection that hides along with them.
 - **Sets up the hiding too.** The Access page sets each Jellyfin user to only see their tag, without touching the rest of their profile.
 - **On your dashboard.** A [Homepage](https://gethomepage.dev) widget shows what's untagged, shared and waiting at a glance.
 - **Yours to run.** One small container, one volume, no accounts anywhere. Works on a Raspberry Pi.
@@ -53,6 +54,14 @@ Tagarr does the tagging for you.
   <tr>
     <td align="center"><sub>Every Seerr request and where it's at</sub></td>
     <td align="center"><sub>Watched it but not tagged? One click fixes it</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/seasonal.png" alt="The Seasonal page: a Halloween season from Oct 1 to Nov 1, shown for Owen, Alex and Jamie, with a Jellyfin collection" /></td>
+    <td width="50%"><img src="docs/screenshots/season-editor.png" alt="Editing a season: dates, every year, who sees it, the titles and the collection" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Halloween movies in October, gone in November</sub></td>
+    <td align="center"><sub>Pick the dates, the people and the titles</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/access.png" alt="The Access page: each Jellyfin user and which tags they can see" /></td>
@@ -158,6 +167,19 @@ This is the part that makes a shared library feel like your own. Jellyfin's pare
 Do this **after** the first sync has tagged things, and keep an eye on **Untagged** on the Overview: a user limited to their own tag can't see untagged items. If plenty of things get added outside Seerr, turn on **Items nobody requested** under **Settings → Automation** to hand them to chosen people automatically after a grace period.
 
 > **Tip:** want some things to show for everyone, like kids' films? Add a person called "Everyone" with no Seerr or Jellyfin account, and include their tag in each user's allowed tags on the Access page. Tag anything with Everyone and it shows for all.
+
+## Seasonal titles
+
+The **Seasonal** page holds titles that should only show at a certain time, like Halloween movies in October. A season has:
+
+- **Dates and times** it starts and ends, either **every year** (the year is ignored, and it can run past New Year, like Dec 20 → Jan 6) or **once**. Times are in the Tagarr server's time zone, so set `TZ`.
+- **Who sees it** while it's in season.
+- **The titles**: search for them in the season, or select them in the Library and choose **Add to season…**.
+- **A Jellyfin collection**, if you want one. Tagarr makes it (or takes over one with the same name), keeps exactly the season's titles in it, and tags it the same way they're tagged.
+
+In season, each title is tagged for the season's people. Out of season it has nobody's tag, and so does the collection. A user limited to their own tags can't see an untagged item or an untagged collection, so the collection disappears instead of sitting there empty. Seasons switch on the minute, without waiting for the next sync, and the Activity page notes each start and end.
+
+While a title is in a season, the season decides who sees it. Its usual people are kept, though: take it out of the season, or delete the season, and it goes back to whoever it belonged to before. Accounts with no tag rule, like an admin, always see everything.
 
 ## Homepage widget
 

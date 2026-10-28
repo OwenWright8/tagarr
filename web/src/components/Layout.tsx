@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity as ActivityIcon,
+  CalendarRange,
   Inbox,
   LayoutDashboard,
   Library as LibraryIcon,
@@ -23,6 +24,7 @@ import { cn, timeAgo } from "./ui";
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/library", label: "Library", icon: LibraryIcon },
+  { to: "/seasonal", label: "Seasonal", icon: CalendarRange },
   { to: "/requests", label: "Requests", icon: Inbox },
   { to: "/suggestions", label: "Suggestions", icon: Sparkles, badge: "suggestions" as const },
   { to: "/access", label: "Access", icon: ShieldCheck },

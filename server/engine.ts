@@ -11,6 +11,8 @@
 //   5. Suggest tags from watch history.
 //   6. Write any missing tags to Jellyfin (this also repairs tags lost to a
 //      metadata refresh), and copy them to seasons/episodes if enabled.
+//   7. Apply seasons: titles in a season carry its people's tags while it's in
+//      season and nobody's outside it, whoever they belong to otherwise.
 //
 // Removing a tag in the app takes it off in Jellyfin straight away, so the
 // two only ever drift through outside changes, which steps 2 and 6 settle.
@@ -18,13 +20,17 @@ import {
   type DB,
   type ItemRow,
   type Person,
+  type SeasonRow,
   type Settings,
   getSettings,
   listPeople,
+  listSeasons,
   logActivity,
+  seasonPeople,
   tx,
 } from "./db.ts";
 import { Jellyfin, hasTag } from "./jellyfin.ts";
+import { type SeasonStatus, seasonStatus } from "./seasons.ts";
 import { REQUEST_DECLINED, Seerr, seerrUserName } from "./seerr.ts";
 
 export interface SyncStatus {
@@ -44,6 +50,8 @@ export interface SyncStats {
   adopted: number;
   fromRequests: number;
   fromRule: number;
+  /** Tags added or taken off by seasons. */
+  seasonal: number;
   pendingRequests: number;
   suggestions: number;
   errors: number;
@@ -65,6 +73,8 @@ export class Engine {
   private again = false;
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
+  private seasonTimer: NodeJS.Timeout | null = null;
+  private lastSeasonKick: { key: string; at: number } | null = null;
   private jfCache: { key: string; client: Jellyfin } | null = null;
 
   constructor(db: DB) {
@@ -91,12 +101,28 @@ export class Engine {
 
   start() {
     this.schedule(5_000);
+    // Seasons start and end on the minute, not on the next sync.
+    this.seasonTimer = setInterval(() => this.checkSeasons(), 60_000);
+    this.seasonTimer.unref?.();
   }
 
   stop() {
     if (this.timer) clearTimeout(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
-    this.timer = this.debounce = null;
+    if (this.seasonTimer) clearInterval(this.seasonTimer);
+    this.timer = this.debounce = this.seasonTimer = null;
+  }
+
+  /** Syncs when a season has started or ended since it was last applied. */
+  checkSeasons(now = new Date()): boolean {
+    const due = listSeasons(this.db).filter((s) => (seasonStatus(s, now).active ? 1 : 0) !== s.applied_active);
+    if (!due.length || this.status.running) return false;
+    // If the sync can't apply it (Jellyfin down), retry every few minutes, not every minute.
+    const key = due.map((s) => s.id).join(",");
+    if (this.lastSeasonKick?.key === key && Date.now() - this.lastSeasonKick.at < 5 * 60_000) return false;
+    this.lastSeasonKick = { key, at: Date.now() };
+    this.sync(due.length === 1 ? `season: ${due[0].name}` : "seasons").catch(() => {});
+    return true;
   }
 
   private schedule(delayMs?: number) {
@@ -151,6 +177,7 @@ export class Engine {
       adopted: 0,
       fromRequests: 0,
       fromRule: 0,
+      seasonal: 0,
       pendingRequests: 0,
       suggestions: 0,
       errors: 0,
@@ -164,19 +191,21 @@ export class Engine {
       this.applyUnrequestedRule(s, people, stats);
       if (s.watchSuggestions) await this.refreshSuggestions(jf, people, stats);
       await this.pushTags(jf, people, stats);
+      await this.applySeasons(jf, people, stats);
       if (s.tagChildren) await this.syncChildren(jf, people, stats);
       stats.pendingRequests = (
         this.db.prepare("SELECT count(*) AS n FROM requests WHERE item_id IS NULL AND status != ?").get(REQUEST_DECLINED) as { n: number }
       ).n;
       stats.suggestions = (this.db.prepare("SELECT count(*) AS n FROM suggestions WHERE dismissed = 0").get() as { n: number }).n;
-      const changes = stats.tagged + stats.fromRequests + stats.fromRule;
+      const changes = stats.tagged + stats.fromRequests + stats.fromRule + stats.seasonal;
       if (changes || stats.adopted) {
         logActivity(
           this.db,
           "sync",
           `Sync: ${plural(stats.fromRequests, "request")} matched, ${plural(stats.tagged, "tag")} written` +
             (stats.adopted ? `, ${plural(stats.adopted, "existing tag")} picked up` : "") +
-            (stats.fromRule ? `, ${plural(stats.fromRule, "unrequested item")} assigned` : ""),
+            (stats.fromRule ? `, ${plural(stats.fromRule, "unrequested item")} assigned` : "") +
+            (stats.seasonal ? `, ${plural(stats.seasonal, "seasonal tag")} changed` : ""),
         );
       }
       this.status = { ...this.status, running: false, finishedAt: Date.now(), ok: stats.errors === 0, stats };
@@ -236,7 +265,10 @@ export class Engine {
 
   private adoptExistingTags(people: Person[], stats: SyncStats) {
     if (!people.length) return;
-    const items = this.db.prepare("SELECT id, tags FROM items").all() as { id: string; tags: string }[];
+    // A season's tags come and go with it; they aren't anyone's to adopt.
+    const items = this.db
+      .prepare("SELECT id, tags FROM items i WHERE NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)")
+      .all() as { id: string; tags: string }[];
     const assigned = this.assignedSet();
     const insert = this.db.prepare(
       "INSERT OR IGNORE INTO assignments (item_id, person_id, source, created_at) VALUES (?, ?, 'jellyfin', ?)",
@@ -354,6 +386,7 @@ export class Engine {
         `SELECT id, name FROM items i
          WHERE rule_applied = 0
            AND (date_created IS NULL OR date_created <= ?)
+           AND NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)
            AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = i.id)
            AND NOT EXISTS (SELECT 1 FROM requests r WHERE r.item_id = i.id AND r.status != ?)`,
       )
@@ -395,6 +428,7 @@ export class Engine {
     this.db.exec(
       "DELETE FROM suggestions WHERE EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = suggestions.item_id AND a.person_id = suggestions.person_id)",
     );
+    this.db.exec("DELETE FROM suggestions WHERE item_id IN (SELECT item_id FROM season_items)");
   }
 
   /** Writes every assigned tag that Jellyfin is missing. */
@@ -403,7 +437,9 @@ export class Engine {
     const rows = this.db
       .prepare(
         `SELECT i.id, i.name, i.tags, group_concat(a.person_id) AS person_ids
-         FROM items i JOIN assignments a ON a.item_id = i.id GROUP BY i.id`,
+         FROM items i JOIN assignments a ON a.item_id = i.id
+         WHERE NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)
+         GROUP BY i.id`,
       )
       .all() as { id: string; name: string; tags: string; person_ids: string }[];
     for (const row of rows) {
@@ -444,7 +480,7 @@ export class Engine {
   }
 
   private async copyTagsToChildren(jf: Jellyfin, series: ItemRow, people: Person[]) {
-    const own = this.assignedPeople(series.id);
+    const own = this.desiredPeople(series.id);
     const want = people.filter((p) => own.has(p.id)).map((p) => p.tag);
     const dontWant = people.filter((p) => !own.has(p.id)).map((p) => p.tag);
     for (const child of await jf.children(series.id)) {
@@ -479,6 +515,11 @@ export class Engine {
       const item = this.item(id);
       if (!item) {
         failed.push({ id, error: "Not in the library" });
+        continue;
+      }
+      const season = this.seasonsOf(id)[0];
+      if (season) {
+        failed.push({ id, error: `${item.name} is in the ${season.name} season, which decides who sees it. Change it on the Seasonal page.` });
         continue;
       }
       try {
@@ -525,14 +566,23 @@ export class Engine {
   /** Renames a person's tag on every item that has it. */
   async renameTag(person: Person, newTag: string) {
     const jf = this.jellyfin();
-    const ids = (
-      this.db.prepare("SELECT item_id FROM assignments WHERE person_id = ?").all(person.id) as { item_id: string }[]
-    ).map((r) => r.item_id);
-    if (jf) {
-      for (const id of ids) {
-        const next = await jf.editTags(id, [newTag], newTag.toLowerCase() === person.tag.toLowerCase() ? [] : [person.tag]);
-        this.db.prepare("UPDATE items SET tags = ?, children_synced = NULL WHERE id = ?").run(JSON.stringify(next), id);
-      }
+    if (!jf) return;
+    const remove = newTag.toLowerCase() === person.tag.toLowerCase() ? [] : [person.tag];
+    // Items assigned to them (in or out of a season), plus seasonal items
+    // showing for them right now.
+    const assigned = this.db.prepare("SELECT item_id FROM assignments WHERE person_id = ?").all(person.id) as { item_id: string }[];
+    const assignedIds = new Set(assigned.map((r) => r.item_id));
+    const items = this.db.prepare("SELECT id, tags FROM items").all() as { id: string; tags: string }[];
+    for (const item of items) {
+      const tagged = hasTag(JSON.parse(item.tags), person.tag);
+      const seasonal = this.seasonsOf(item.id).length > 0;
+      if (seasonal ? !tagged : !assignedIds.has(item.id)) continue;
+      const next = await jf.editTags(item.id, [newTag], remove);
+      this.db.prepare("UPDATE items SET tags = ?, children_synced = NULL WHERE id = ?").run(JSON.stringify(next), item.id);
+    }
+    for (const id of this.collectionIds()) {
+      const col = await jf.getCollection(id);
+      if (col && hasTag(col.Tags ?? [], person.tag)) await jf.editTags(id, [newTag], remove);
     }
   }
 
@@ -546,6 +596,166 @@ export class Engine {
       const next = await jf.editTags(item.id, [], [person.tag]);
       this.db.prepare("UPDATE items SET tags = ?, children_synced = NULL WHERE id = ?").run(JSON.stringify(next), item.id);
     }
+    for (const id of this.collectionIds()) {
+      const col = await jf.getCollection(id);
+      if (col && hasTag(col.Tags ?? [], person.tag)) await jf.editTags(id, [], [person.tag]);
+    }
+  }
+
+  // --- Seasons ----------------------------------------------------------------------
+
+  /** Who each seasonal item is for right now: its active seasons' people, or nobody. */
+  private seasonalWant(seasons: SeasonRow[], status: Map<number, SeasonStatus>): Map<string, Set<number>> {
+    const byId = new Map(seasons.map((s) => [s.id, s]));
+    const want = new Map<string, Set<number>>();
+    const rows = this.db.prepare("SELECT season_id, item_id FROM season_items").all() as { season_id: number; item_id: string }[];
+    for (const r of rows) {
+      const set = want.get(r.item_id) ?? new Set<number>();
+      const season = byId.get(r.season_id);
+      if (season && status.get(season.id)?.active) for (const id of seasonPeople(season)) set.add(id);
+      want.set(r.item_id, set);
+    }
+    return want;
+  }
+
+  /** Makes seasonal items' (and their collections') tags match their seasons. */
+  private async applySeasons(jf: Jellyfin, people: Person[], stats: SyncStats) {
+    const seasons = listSeasons(this.db);
+    if (!seasons.length) return;
+    const now = new Date();
+    const status = new Map(seasons.map((s) => [s.id, seasonStatus(s, now)]));
+    for (const [itemId, ids] of this.seasonalWant(seasons, status)) {
+      const item = this.item(itemId);
+      if (!item) continue;
+      try {
+        const changed = await this.setPeopleTags(jf, item, people, ids);
+        stats.seasonal += changed;
+      } catch (err) {
+        stats.errors++;
+        logActivity(this.db, "error", `Couldn't apply the season to ${item.name}: ${errorText(err)}`, { itemId });
+      }
+    }
+    for (const season of seasons) {
+      const st = status.get(season.id)!;
+      if (season.collection) {
+        try {
+          await this.syncCollection(jf, season, st.active, people);
+        } catch (err) {
+          stats.errors++;
+          logActivity(this.db, "error", `Couldn't update the ${season.name} collection: ${errorText(err)}`);
+        }
+      }
+      const active = st.active ? 1 : 0;
+      if (season.applied_active === active) continue;
+      this.db.prepare("UPDATE seasons SET applied_active = ? WHERE id = ?").run(active, season.id);
+      const n = (this.db.prepare("SELECT count(*) AS n FROM season_items WHERE season_id = ?").get(season.id) as { n: number }).n;
+      const names = people.filter((p) => seasonPeople(season).includes(p.id)).map((p) => p.name);
+      logActivity(
+        this.db,
+        "season",
+        active
+          ? `${season.name} is in season: ${plural(n, "title")} showing for ${names.length ? names.join(", ") : "nobody"} until ${shortDate(st.end)}`
+          : st.over
+            ? `${season.name} is over: ${plural(n, "title")} hidden`
+            : `${season.name} is out of season: ${plural(n, "title")} hidden until ${shortDate(st.start)}`,
+      );
+    }
+  }
+
+  /** Gives an item exactly these people's tags (other tags stay). Returns tags changed. */
+  private async setPeopleTags(jf: Jellyfin, item: ItemRow, people: Person[], ids: Set<number>): Promise<number> {
+    const tags = JSON.parse(item.tags) as string[];
+    const add = people.filter((p) => ids.has(p.id) && !hasTag(tags, p.tag)).map((p) => p.tag);
+    const remove = people.filter((p) => !ids.has(p.id) && hasTag(tags, p.tag)).map((p) => p.tag);
+    if (!add.length && !remove.length) return 0;
+    const next = await jf.editTags(item.id, add, remove);
+    this.db.prepare("UPDATE items SET tags = ?, children_synced = NULL WHERE id = ?").run(JSON.stringify(next), item.id);
+    return add.length + remove.length;
+  }
+
+  /**
+   * Keeps a season's Jellyfin collection holding exactly its items, and tagged
+   * for its people only while it's in season. People who can only see tagged
+   * items can't see an untagged collection, so out of season it's hidden
+   * rather than showing up empty.
+   */
+  private async syncCollection(jf: Jellyfin, season: SeasonRow, active: boolean, people: Person[]) {
+    const itemIds = (
+      this.db.prepare("SELECT item_id FROM season_items WHERE season_id = ? ORDER BY item_id").all(season.id) as { item_id: string }[]
+    ).map((r) => r.item_id);
+    const name = season.collection_name?.trim() || season.name;
+    let col = season.collection_id ? await jf.getCollection(season.collection_id) : null;
+    if (!col) {
+      if (!itemIds.length) return; // Made once there's something to put in it.
+      // Take over a collection that already has this name, rather than making a second.
+      const existing = await jf.findCollection(name);
+      const id = existing?.Id ?? (await jf.createCollection(name, itemIds));
+      this.db.prepare("UPDATE seasons SET collection_id = ? WHERE id = ?").run(id, season.id);
+      col = existing ?? (await jf.getItem(id));
+      logActivity(this.db, "season", `${existing ? "Using" : "Made"} the “${name}” collection in Jellyfin for ${season.name}`);
+    }
+    const inside = new Set(await jf.collectionItems(col.Id));
+    const want = new Set(itemIds);
+    const add = itemIds.filter((id) => !inside.has(id));
+    const remove = [...inside].filter((id) => !want.has(id));
+    if (add.length) await jf.addToCollection(col.Id, add);
+    if (remove.length) await jf.removeFromCollection(col.Id, remove);
+    if (col.Name !== name) await jf.rename(col.Id, name);
+    const who = new Set(active ? seasonPeople(season) : []);
+    const tags = col.Tags ?? [];
+    const addTags = people.filter((p) => who.has(p.id) && !hasTag(tags, p.tag)).map((p) => p.tag);
+    const removeTags = people.filter((p) => !who.has(p.id) && hasTag(tags, p.tag)).map((p) => p.tag);
+    if (addTags.length || removeTags.length) await jf.editTags(col.Id, addTags, removeTags);
+  }
+
+  /**
+   * Items that just left every season go back to who they belong to: their
+   * people tags are set to their assignments again.
+   */
+  async releaseItems(itemIds: string[]) {
+    const jf = this.jellyfin();
+    if (!jf) return;
+    const s = this.settings();
+    const people = listPeople(this.db);
+    for (const id of itemIds) {
+      const item = this.item(id);
+      if (!item || this.seasonsOf(id).length) continue;
+      try {
+        await this.setPeopleTags(jf, item, people, this.assignedPeople(id));
+        if (s.tagChildren && item.type === "Series") {
+          await this.copyTagsToChildren(jf, item, people);
+          this.db.prepare("UPDATE items SET children_synced = coalesce(child_count, -1) WHERE id = ?").run(id);
+        }
+      } catch (err) {
+        logActivity(this.db, "error", `Couldn't put ${item.name}'s tags back after it left a season: ${errorText(err)}`, { itemId: id });
+      }
+    }
+  }
+
+  async deleteCollection(collectionId: string) {
+    const jf = this.jellyfin();
+    if (jf) await jf.deleteItem(collectionId);
+  }
+
+  seasonsOf(itemId: string): SeasonRow[] {
+    return this.db
+      .prepare("SELECT s.* FROM seasons s JOIN season_items si ON si.season_id = s.id WHERE si.item_id = ? ORDER BY s.id")
+      .all(itemId) as unknown as SeasonRow[];
+  }
+
+  private collectionIds(): string[] {
+    return (this.db.prepare("SELECT collection_id FROM seasons WHERE collection_id IS NOT NULL").all() as { collection_id: string }[]).map(
+      (r) => r.collection_id,
+    );
+  }
+
+  /** Who an item should be tagged for now: its season's people if it's seasonal. */
+  private desiredPeople(itemId: string): Set<number> {
+    const seasons = this.seasonsOf(itemId);
+    if (!seasons.length) return this.assignedPeople(itemId);
+    const out = new Set<number>();
+    for (const season of seasons) if (seasonStatus(season).active) for (const id of seasonPeople(season)) out.add(id);
+    return out;
   }
 
   // --- Helpers --------------------------------------------------------------------
@@ -592,6 +802,10 @@ export interface RequestRow {
 
 function lowerKeys(obj: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v]));
+}
+
+function shortDate(d: Date) {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function plural(n: number, word: string) {

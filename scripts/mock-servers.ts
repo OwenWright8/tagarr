@@ -12,7 +12,7 @@ export const SEERR_KEY = "seerr-key";
 interface MockItem {
   Id: string;
   Name: string;
-  Type: "Movie" | "Series" | "Season" | "Episode";
+  Type: "Movie" | "Series" | "Season" | "Episode" | "BoxSet";
   ProductionYear?: number;
   ProviderIds: Record<string, string>;
   Tags: string[];
@@ -22,6 +22,8 @@ interface MockItem {
   Overview?: string;
   Genres?: string[];
   People?: { Name: string; Type: string; Role?: string }[];
+  /** A collection's members (BoxSet only). */
+  Children?: string[];
 }
 
 interface MockUser {
@@ -33,6 +35,7 @@ interface MockUser {
 
 const MOVIES_LIB = "f137a2dd21bbc1b99aa5c0f6bf02a805";
 const SHOWS_LIB = "a656b907eb3a73532e40e44b968d0225";
+const COLLECTIONS_FOLDER = "c0115ec7c0115ec7c0115ec7c0115ec7";
 
 // [title, year, type, tmdb, tags already in Jellyfin, days since added]
 const DEMO: [string, number, "Movie" | "Series", number, string[], number][] = [
@@ -216,13 +219,31 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
       u.Policy = { ...u.Policy, ...(JSON.parse(body) as MockUser["Policy"]) };
       return send(204);
     }
+    if (p === "/Collections" && req.method === "POST") {
+      const ids = (q.get("Ids") ?? "").split(",").filter((id) => items.has(id));
+      const col = add({ Name: q.get("Name") ?? "Collection", Type: "BoxSet", ProviderIds: {}, Tags: [], DateCreated: new Date().toISOString(), ParentId: COLLECTIONS_FOLDER, Children: ids });
+      return send(200, { Id: col.Id });
+    }
+    let c = p.match(/^\/Collections\/([^/]+)\/Items$/);
+    if (c) {
+      const col = items.get(c[1]);
+      if (!col || col.Type !== "BoxSet") return send(404);
+      const ids = (q.get("Ids") ?? "").split(",").filter(Boolean);
+      if (req.method === "POST") col.Children = [...new Set([...(col.Children ?? []), ...ids.filter((id) => items.has(id))])];
+      else if (req.method === "DELETE") col.Children = (col.Children ?? []).filter((id) => !ids.includes(id));
+      return send(204);
+    }
     if (p === "/Items") {
       const types = (q.get("IncludeItemTypes") ?? "").split(",").filter(Boolean);
       const parent = q.get("ParentId");
       const filter = q.get("Filters");
+      const search = q.get("SearchTerm")?.toLowerCase();
       const user = users.find((u) => u.Id === q.get("userId"));
-      let list = [...items.values()].filter((i) => !types.length || types.includes(i.Type));
-      if (parent) list = list.filter((i) => isUnder(i, parent));
+      let list = [...items.values()].filter((i) => (!types.length ? i.Type !== "BoxSet" : types.includes(i.Type)));
+      const parentItem = parent ? items.get(parent) : undefined;
+      if (parentItem?.Type === "BoxSet") list = (parentItem.Children ?? []).map((id) => items.get(id)!).filter(Boolean);
+      else if (parent) list = list.filter((i) => isUnder(i, parent));
+      if (search) list = list.filter((i) => i.Name.toLowerCase().includes(search));
       if (filter === "IsPlayed") list = list.filter((i) => user?.played.has(i.Id));
       if (filter === "IsResumable") list = [];
       if (user && !user.Policy.IsAdministrator && user.Policy.AllowedTags.length) {
@@ -243,6 +264,10 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
     if (m) {
       const item = items.get(m[1]);
       if (!item) return send(404);
+      if (req.method === "DELETE") {
+        items.delete(item.Id);
+        return send(204);
+      }
       if (req.method === "POST") {
         const next = JSON.parse(body) as MockItem;
         // Real Jellyfin can't read TrickplayInfoDto back and answers 500.
