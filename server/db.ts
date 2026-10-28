@@ -140,6 +140,23 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX season_items_item ON season_items (item_id);
   `,
+  `
+  -- A season's collection is just a list of titles, not a film series: keep
+  -- Jellyfin from matching it online by name (a "Halloween" collection would
+  -- otherwise become TMDB's Halloween franchise, poster and all).
+  ALTER TABLE seasons ADD COLUMN collection_generic INTEGER NOT NULL DEFAULT 1;
+
+  -- A cover uploaded for the season, used as its collection's poster.
+  -- cover_applied is "<version>|<Jellyfin image tag>" after the upload, so a
+  -- poster replaced in Jellyfin (or a new cover here) is noticed and redone.
+  CREATE TABLE season_covers (
+    season_id INTEGER PRIMARY KEY REFERENCES seasons (id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    data BLOB NOT NULL,
+    version INTEGER NOT NULL
+  );
+  ALTER TABLE seasons ADD COLUMN cover_applied TEXT;
+  `,
 ];
 
 export function openDb(file: string): DB {
@@ -278,6 +295,8 @@ export interface SeasonRow {
   collection: number;
   collection_name: string | null;
   collection_id: string | null;
+  collection_generic: number;
+  cover_applied: string | null;
   applied_active: number | null;
   created_at: number;
 }

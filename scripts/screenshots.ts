@@ -183,12 +183,17 @@ try {
           if (await hit.waitFor({ timeout: 3000 }).then(() => true, () => false)) await hit.click();
         }
         await dialog.getByPlaceholder("Search your library to add titles").fill("");
+        await dialog.locator('input[type="file"]').setInputFiles(path.join(root, "scripts/fixtures/halloween-cover.png"));
+        await dialog.getByRole("button", { name: "Replace" }).waitFor();
         await shot(p, "season-editor");
         await dialog.getByRole("button", { name: "Add season" }).click();
         await p.getByRole("heading", { name: "Halloween" }).waitFor();
         await engine.sync("screenshots");
         const col = [...mock.items.values()].find((i) => i.Type === "BoxSet");
         if (col?.Name !== "Halloween" || col.Children?.length !== 3) throw new Error(`collection is ${JSON.stringify(col?.Children)}`);
+        const uploads = (col as unknown as { uploads?: Buffer[] }).uploads ?? [];
+        if (!uploads[0]?.equals(fs.readFileSync(path.join(root, "scripts/fixtures/halloween-cover.png")))) throw new Error("cover didn't reach Jellyfin");
+        if (Object.values(col.ProviderIds).some(Boolean)) throw new Error("collection still matched online");
         await p.reload();
         await p.getByText(/3 titles/).waitFor();
         await shot(p, "seasonal");

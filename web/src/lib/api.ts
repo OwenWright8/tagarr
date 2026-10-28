@@ -73,6 +73,8 @@ export interface Season {
   collection: boolean;
   collectionName: string | null;
   collectionMade: boolean;
+  collectionGeneric: boolean;
+  coverVersion: number | null;
   itemCount: number;
   /** The current window, or the next one. */
   status: { active: boolean; over: boolean; start: string; end: string };

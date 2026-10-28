@@ -506,6 +506,8 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       collection: !!row.collection,
       collectionName: row.collection_name,
       collectionMade: !!row.collection_id,
+      collectionGeneric: !!row.collection_generic,
+      coverVersion: (db.prepare("SELECT version FROM season_covers WHERE season_id = ?").get(row.id) as { version: number } | undefined)?.version ?? null,
       itemCount: n,
       status: { active: st.active, over: st.over, start: st.start.toISOString(), end: st.end.toISOString() },
       applied: row.applied_active === (st.active ? 1 : 0),
@@ -517,7 +519,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     (db.prepare("SELECT item_id FROM season_items WHERE season_id = ?").all(id) as { item_id: string }[]).map((r) => r.item_id);
 
   /** Validates a season body against the current row (for edits). */
-  function readSeason(body: SeasonBody, current?: SeasonRow): { error: string } | { value: Omit<SeasonRow, "id" | "created_at" | "collection_id" | "applied_active">; itemIds?: string[] } {
+  function readSeason(body: SeasonBody, current?: SeasonRow): { error: string } | { value: Omit<SeasonRow, "id" | "created_at" | "collection_id" | "applied_active" | "cover_applied">; itemIds?: string[] } {
     const name = body.name !== undefined ? String(body.name).trim() : (current?.name ?? "");
     if (!name) return { error: "Give the season a name" };
     if (name.length > 100) return { error: "That name is too long" };
@@ -529,6 +531,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     const known = new Set(listPeople(db).map((p) => p.id));
     const people = body.people !== undefined ? arrayOf(body.people, "number").filter((id) => known.has(id)) : current ? seasonPeople(current) : [];
     const collection = body.collection !== undefined ? !!body.collection : !!current?.collection;
+    const collectionGeneric = body.collectionGeneric !== undefined ? !!body.collectionGeneric : current ? !!current.collection_generic : true;
     const collectionName =
       body.collectionName !== undefined ? String(body.collectionName ?? "").trim().slice(0, 100) || null : (current?.collection_name ?? null);
     let itemIds: string[] | undefined;
@@ -546,6 +549,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
         people: JSON.stringify([...new Set(people)]),
         collection: collection ? 1 : 0,
         collection_name: collectionName,
+        collection_generic: collectionGeneric ? 1 : 0,
       },
       itemIds,
     };
@@ -579,10 +583,10 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     const id = tx(db, () => {
       const res = db
         .prepare(
-          `INSERT INTO seasons (name, start_at, end_at, yearly, people, collection, collection_name, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO seasons (name, start_at, end_at, yearly, people, collection, collection_name, collection_generic, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, Date.now());
+        .run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, v.collection_generic, Date.now());
       const id = Number(res.lastInsertRowid);
       const add = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) VALUES (?, ?)");
       for (const itemId of read.itemIds ?? []) add.run(id, itemId);
@@ -612,8 +616,8 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     tx(db, () => {
       db.prepare(
         `UPDATE seasons SET name = ?, start_at = ?, end_at = ?, yearly = ?, people = ?, collection = ?, collection_name = ?,
-         collection_id = CASE WHEN ? THEN collection_id ELSE NULL END WHERE id = ?`,
-      ).run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, v.collection, row.id);
+         collection_generic = ?, collection_id = CASE WHEN ? THEN collection_id ELSE NULL END WHERE id = ?`,
+      ).run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, v.collection_generic, v.collection, row.id);
       if (read.itemIds) {
         db.prepare("DELETE FROM season_items WHERE season_id = ?").run(row.id);
         const add = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) VALUES (?, ?)");
@@ -641,6 +645,45 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     if (added) logActivity(db, "season", `Added ${plural(added, "title")} to ${row.name}`);
     await afterSeasonChange(remove, "season changed");
     return { ok: true, added };
+  });
+
+  // The season's cover, used as its collection's poster. Uploaded as the raw
+  // image (not a form), so it's as CSRF-proof as the JSON routes: a cross-site
+  // page can't send an image content type without a CORS preflight.
+  const COVER_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  app.addContentTypeParser(COVER_TYPES, { parseAs: "buffer", bodyLimit: 10 * 1024 * 1024 }, (_req, body, done) => done(null, body));
+
+  app.get<{ Params: { id: string } }>("/api/seasons/:id/cover", async (req, reply) => {
+    const cover = engine.cover(Number(req.params.id));
+    if (!cover) return reply.code(404).send({ error: "No cover" });
+    reply.header("Content-Type", cover.type);
+    reply.header("Cache-Control", "private, max-age=31536000, immutable"); // the URL carries ?v=<version>
+    return reply.send(Buffer.from(cover.data));
+  });
+
+  app.put<{ Params: { id: string }; Body: Buffer }>("/api/seasons/:id/cover", { bodyLimit: 10 * 1024 * 1024 }, async (req, reply) => {
+    const row = getSeason(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: "No such season" });
+    const type = String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+    const data = req.body;
+    if (!COVER_TYPES.includes(type) || !Buffer.isBuffer(data) || imageType(data) !== type) {
+      return reply.code(400).send({ error: "Use a JPEG, PNG or WebP image" });
+    }
+    db.prepare(
+      `INSERT INTO season_covers (season_id, type, data, version) VALUES (?, ?, ?, ?)
+       ON CONFLICT (season_id) DO UPDATE SET type = excluded.type, data = excluded.data, version = excluded.version`,
+    ).run(row.id, type, data, Date.now());
+    logActivity(db, "season", `New cover for ${row.name}`);
+    engine.poke("season cover");
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/seasons/:id/cover", async (req, reply) => {
+    const row = getSeason(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: "No such season" });
+    db.prepare("DELETE FROM season_covers WHERE season_id = ?").run(row.id);
+    engine.poke("season cover");
+    return { ok: true };
   });
 
   app.delete<{ Params: { id: string }; Querystring: { keepCollection?: string } }>("/api/seasons/:id", async (req, reply) => {
@@ -962,7 +1005,16 @@ interface SeasonBody {
   people?: number[];
   collection?: boolean;
   collectionName?: string | null;
+  collectionGeneric?: boolean;
   itemIds?: string[];
+}
+
+/** What an image really is, from its first bytes (not what it claims). */
+function imageType(b: Buffer): string | null {
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (b.length > 12 && b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  return null;
 }
 
 function plural(n: number, word: string) {

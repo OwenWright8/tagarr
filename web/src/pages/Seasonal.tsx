@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarRange, Check, Film, Library as LibraryIcon, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { CalendarRange, Check, Film, ImagePlus, Library as LibraryIcon, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, get, type Item, type Person, type Season, type SeasonDetail } from "@/lib/api";
+import { ApiError, api, get, type Item, type Person, type Season, type SeasonDetail } from "@/lib/api";
 import { PageHeader } from "@/components/Layout";
 import { Avatar, AvatarStack, Poster, usePeople } from "@/components/people";
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageSpinner, Spinner, Switch, cn } from "@/components/ui";
@@ -87,9 +87,13 @@ export default function SeasonalPage() {
             return (
               <Card key={s.id} className="p-4 sm:p-5">
                 <div className="flex items-start gap-4">
-                  <div className={cn("hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:flex", s.status.active ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>
-                    <CalendarRange className="h-5 w-5" />
-                  </div>
+                  {s.coverVersion ? (
+                    <img src={coverUrl(s.id, s.coverVersion)} alt="" className="hidden h-[66px] w-11 shrink-0 rounded-lg object-cover shadow-sm sm:block" />
+                  ) : (
+                    <div className={cn("hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:flex", s.status.active ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>
+                      <CalendarRange className="h-5 w-5" />
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-base font-semibold">{s.name}</h2>
@@ -151,6 +155,14 @@ export default function SeasonalPage() {
   );
 }
 
+const coverUrl = (id: number, version: number) => `/api/seasons/${id}/cover?v=${version}`;
+const COVER_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+async function uploadCover(id: number, file: File) {
+  const res = await fetch(`/api/seasons/${id}/cover`, { method: "PUT", credentials: "same-origin", headers: { "Content-Type": file.type }, body: file });
+  if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Couldn't upload the cover");
+}
+
 const PRESETS: { name: string; start: string; end: string }[] = [
   { name: "Halloween", start: "10-01", end: "11-01" },
   { name: "Christmas", start: "12-01", end: "12-27" },
@@ -174,6 +186,12 @@ function SeasonEditor({ id, people, onClose }: { id: number | null; people: Pers
   const [items, setItems] = useState<Map<string, PickedItem>>(new Map());
   const [collection, setCollection] = useState(true);
   const [collectionName, setCollectionName] = useState("");
+  const [generic, setGeneric] = useState(true);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverRemoved, setCoverRemoved] = useState(false);
+  const coverPreview = useMemo(() => (coverFile ? URL.createObjectURL(coverFile) : null), [coverFile]);
+  useEffect(() => () => void (coverPreview && URL.revokeObjectURL(coverPreview)), [coverPreview]);
+  const savedCover = id !== null && detail.data?.coverVersion && !coverRemoved ? coverUrl(id, detail.data.coverVersion) : null;
   const [loaded, setLoaded] = useState(id === null);
 
   useEffect(() => {
@@ -187,11 +205,12 @@ function SeasonEditor({ id, people, onClose }: { id: number | null; people: Pers
     setItems(new Map(d.items.map((i) => [i.id, i])));
     setCollection(d.collection);
     setCollectionName(d.collectionName ?? "");
+    setGeneric(d.collectionGeneric);
     setLoaded(true);
   }, [detail.data, loaded]);
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const body = {
         name,
         start: `${startDate}T${startTime || "00:00"}`,
@@ -201,8 +220,11 @@ function SeasonEditor({ id, people, onClose }: { id: number | null; people: Pers
         itemIds: [...items.keys()],
         collection,
         collectionName: collectionName.trim() || null,
+        collectionGeneric: generic,
       };
-      return id === null ? api("POST", "/seasons", body) : api("PATCH", `/seasons/${id}`, body);
+      const saved = id === null ? await api<{ id: number }>("POST", "/seasons", body) : (await api("PATCH", `/seasons/${id}`, body), { id });
+      if (coverFile) await uploadCover(saved.id, coverFile);
+      else if (coverRemoved && detail.data?.coverVersion) await api("DELETE", `/seasons/${saved.id}/cover`);
     },
     onSuccess: () => {
       toast.success(id === null ? `${name} added. Jellyfin updates in a few seconds.` : "Saved. Jellyfin updates in a few seconds.");
@@ -351,10 +373,81 @@ function SeasonEditor({ id, people, onClose }: { id: number | null; people: Pers
                 <Input value={collectionName} onChange={(e) => setCollectionName(e.target.value)} placeholder={name || "Halloween"} maxLength={100} />
               </Field>
             )}
+            {collection && (
+              <CoverPicker
+                preview={coverPreview ?? savedCover}
+                onPick={(f) => {
+                  setCoverFile(f);
+                  setCoverRemoved(false);
+                }}
+                onRemove={() => {
+                  setCoverFile(null);
+                  setCoverRemoved(true);
+                }}
+              />
+            )}
+            {collection && (
+              <label className="flex items-center justify-between gap-4 border-t pt-3">
+                <span>
+                  <span className="block text-sm font-medium">Don't match it online</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Stops Jellyfin turning a “{collectionName.trim() || name || "Halloween"}” collection into the film series with the same name. Tagarr clears that
+                    match and locks the collection; its poster becomes a collage of its titles. Turn off only to use a real film series' collection.
+                  </span>
+                </span>
+                <Switch checked={generic} onChange={setGeneric} label="Don't match it online" />
+              </label>
+            )}
           </div>
         </div>
       )}
     </Modal>
+  );
+}
+
+function CoverPicker({ preview, onPick, onRemove }: { preview: string | null; onPick: (f: File) => void; onRemove: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center gap-4 border-t pt-3">
+      <button
+        type="button"
+        onClick={() => input.current?.click()}
+        className="flex h-[90px] w-[60px] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/50 text-muted-foreground hover:bg-muted"
+        aria-label="Choose a cover image"
+      >
+        {preview ? <img src={preview} alt="" className="h-full w-full object-cover" /> : <ImagePlus className="h-5 w-5" />}
+      </button>
+      <div className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">Cover</span>
+        <span className="block text-xs text-muted-foreground">
+          The collection's poster in Jellyfin. JPEG, PNG or WebP up to 10 MB, ideally tall like a movie poster (2:3). Without one, Jellyfin makes a collage of the titles.
+        </span>
+        <div className="mt-2 flex gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => input.current?.click()}>
+            {preview ? "Replace" : "Upload image"}
+          </Button>
+          {preview && (
+            <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+      <input
+        ref={input}
+        type="file"
+        accept={COVER_TYPES.join(",")}
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          if (!COVER_TYPES.includes(f.type)) return void toast.error("Use a JPEG, PNG or WebP image");
+          if (f.size > 10 * 1024 * 1024) return void toast.error("That image is over 10 MB");
+          onPick(f);
+        }}
+      />
+    </div>
   );
 }
 

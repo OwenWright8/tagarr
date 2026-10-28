@@ -189,7 +189,7 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
       res.end(body === undefined ? "" : type === "application/json" ? JSON.stringify(body) : String(body));
     };
     const imageRoute = url.pathname.match(/^\/Items\/([^/]+)\/Images\/Primary$/);
-    if (imageRoute) {
+    if (imageRoute && req.method === "GET") {
       const item = items.get(imageRoute[1]);
       return item ? send(200, poster(item), "image/svg+xml") : send(404);
     }
@@ -221,7 +221,11 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
     }
     if (p === "/Collections" && req.method === "POST") {
       const ids = (q.get("Ids") ?? "").split(",").filter((id) => items.has(id));
-      const col = add({ Name: q.get("Name") ?? "Collection", Type: "BoxSet", ProviderIds: {}, Tags: [], DateCreated: new Date().toISOString(), ParentId: COLLECTIONS_FOLDER, Children: ids });
+      const name = q.get("Name") ?? "Collection";
+      const col = add({ Name: name, Type: "BoxSet", ProviderIds: {}, Tags: [], DateCreated: new Date().toISOString(), ParentId: COLLECTIONS_FOLDER, Children: ids });
+      // Like Jellyfin's refresh after creating one: matched online by name,
+      // with the franchise's overview and artwork.
+      Object.assign(col, { ProviderIds: { Tmdb: "91361" }, Overview: `The ${name} franchise`, ImageTags: { Primary: "tmdb" }, BackdropImageTags: ["tmdb"] });
       return send(200, { Id: col.Id });
     }
     let c = p.match(/^\/Collections\/([^/]+)\/Items$/);
@@ -259,6 +263,32 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
         RecursiveItemCount: i.Type === "Series" ? [...items.values()].filter((c) => c.SeriesId === i.Id).length : undefined,
       }));
       return send(200, { Items: pageItems, TotalRecordCount: list.length });
+    }
+    m = p.match(/^\/Items\/([^/]+)\/Images\/([^/]+)$/);
+    if (m && req.method === "POST") {
+      const item = items.get(m[1]) as (MockItem & { ImageTags?: Record<string, string>; uploads?: Buffer[] }) | undefined;
+      if (!item) return send(404);
+      // Jellyfin wants the image base64-encoded in the body.
+      const data = Buffer.from(body, "base64");
+      item.uploads = [...(item.uploads ?? []), data];
+      item.ImageTags = { ...(item.ImageTags ?? {}), [m[2]]: `upload-${item.uploads.length}` };
+      return send(204);
+    }
+    if (m && req.method === "DELETE") {
+      const item = items.get(m[1]) as (MockItem & { ImageTags?: Record<string, string>; BackdropImageTags?: string[] }) | undefined;
+      if (!item) return send(404);
+      if (m[2] === "Backdrop") item.BackdropImageTags = [];
+      else if (item.ImageTags) delete item.ImageTags[m[2]];
+      return send(204);
+    }
+    m = p.match(/^\/Items\/([^/]+)\/Refresh$/);
+    if (m && req.method === "POST") {
+      const item = items.get(m[1]) as (MockItem & { LockData?: boolean; refreshes?: number }) | undefined;
+      if (!item) return send(404);
+      item.refreshes = (item.refreshes ?? 0) + 1;
+      // A locked item isn't looked up online again.
+      if (!item.LockData && item.Type === "BoxSet") item.ProviderIds = { Tmdb: "91361" };
+      return send(204);
     }
     m = p.match(/^\/Items\/([^/]+)$/);
     if (m) {

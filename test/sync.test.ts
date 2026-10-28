@@ -317,6 +317,39 @@ test("seasons show titles only in season, and keep a collection that hides with 
   assert.deepEqual(collection()?.Children?.sort(), [idOf("Coco"), idOf("Paddington 2")].sort());
   assert.deepEqual(collection()?.Tags, ["Alex"]);
   assert.equal(await alexSeesCollection(), true);
+  // Jellyfin matched "Halloween" to the film series online; Tagarr undoes that and locks it.
+  const col = collection() as unknown as Record<string, unknown>;
+  assert.deepEqual(col.ProviderIds, {});
+  assert.equal(col.LockData, true);
+  assert.equal(col.Overview, "");
+  assert.deepEqual(col.ImageTags, {});
+  assert.deepEqual(col.BackdropImageTags, []);
+  assert.equal(col.refreshes, 1);
+  await engine.sync("test");
+  assert.equal((collection() as unknown as Record<string, unknown>).refreshes, 1); // done once, not every sync
+
+  // A cover uploaded for the season becomes the collection's poster.
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("pretend pumpkin")]);
+  const put = (payload: Buffer, type: string) =>
+    app.inject({ method: "PUT", url: `/api/seasons/${id}/cover`, headers: { cookie, "content-type": type }, payload });
+  assert.equal((await put(Buffer.from("not an image"), "image/png")).statusCode, 400);
+  assert.equal((await put(png, "image/jpeg")).statusCode, 400); // says JPEG, is PNG
+  assert.equal((await put(png, "image/png")).statusCode, 200);
+  assert.ok((await api("GET", "/api/seasons")).json[0].coverVersion);
+  const uploads = () => ((collection() as unknown as { uploads?: Buffer[] }).uploads ?? []);
+  await engine.sync("test");
+  assert.equal(uploads().length, 1);
+  assert.ok(uploads()[0].equals(png));
+  await engine.sync("test");
+  assert.equal(uploads().length, 1); // not re-sent every sync
+  // Something in Jellyfin replaces the poster: it's put back.
+  (collection() as unknown as { ImageTags: Record<string, string> }).ImageTags.Primary = "collage";
+  await engine.sync("test");
+  assert.equal(uploads().length, 2);
+  // Removing the cover takes it off the collection.
+  await api("DELETE", `/api/seasons/${id}/cover`);
+  await engine.sync("test");
+  assert.equal((collection() as unknown as { ImageTags: Record<string, string> }).ImageTags.Primary, undefined);
   const season = (await api("GET", `/api/seasons/${id}`)).json;
   assert.equal(season.status.active, true);
   assert.equal(season.items.length, 2);

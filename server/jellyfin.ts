@@ -227,6 +227,66 @@ export class Jellyfin {
     }
   }
 
+  /**
+   * Unlinks an item from online metadata and locks it, so Jellyfin stops
+   * looking it up: provider ids, the downloaded overview and downloaded
+   * artwork go, then a refresh lets Jellyfin draw its own poster (for a
+   * collection, a collage of what's in it).
+   */
+  async makeGeneric(item: JellyfinItem, opts: { refresh: boolean }) {
+    const wasMatched = Object.values(item.ProviderIds ?? {}).some(Boolean);
+    await this.request("POST", `/Items/${item.Id}`, {
+      ...editableFields(item),
+      ProviderIds: {},
+      LockData: true,
+      ...(wasMatched ? { Overview: "" } : {}),
+    });
+    if (!wasMatched) return;
+    await this.deleteImages(item);
+    if (!opts.refresh) return;
+    const q = new URLSearchParams({ MetadataRefreshMode: "Default", ImageRefreshMode: "FullRefresh", ReplaceAllImages: "true", ReplaceAllMetadata: "false" });
+    await this.request("POST", `/Items/${item.Id}/Refresh?${q}`);
+  }
+
+  /** Removes an item's artwork (all of it, or just these types). */
+  async deleteImages(item: JellyfinItem, only?: string[]) {
+    const images = [
+      ...Object.keys((item.ImageTags as Record<string, string> | undefined) ?? {}),
+      ...((item.BackdropImageTags as string[] | undefined)?.length ? ["Backdrop"] : []),
+    ];
+    for (const type of new Set(images)) {
+      if (only && !only.includes(type)) continue;
+      try {
+        await this.request("DELETE", `/Items/${item.Id}/Images/${type}`);
+      } catch (err) {
+        if (!(err instanceof HttpError && err.status === 404)) throw err;
+      }
+    }
+  }
+
+  /** Asks Jellyfin to redraw an item's own artwork (a collection's collage). */
+  async refreshImages(itemId: string) {
+    const q = new URLSearchParams({ MetadataRefreshMode: "None", ImageRefreshMode: "FullRefresh", ReplaceAllImages: "true", ReplaceAllMetadata: "false" });
+    await this.request("POST", `/Items/${itemId}/Refresh?${q}`);
+  }
+
+  /** Sets an item's poster. Jellyfin takes the image base64-encoded, typed as the image. */
+  async uploadImage(itemId: string, type: "Primary", mime: string, data: Uint8Array) {
+    const res = await fetch(`${this.baseUrl}/Items/${itemId}/Images/${type}`, {
+      method: "POST",
+      headers: {
+        Authorization: `MediaBrowser Client="Tagarr", Device="Tagarr", DeviceId="tagarr", Version="1", Token="${this.apiKey}"`,
+        "Content-Type": mime,
+      },
+      body: Buffer.from(data).toString("base64"),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new HttpError(res.status, `Jellyfin POST /Items/{id}/Images/${type} → ${res.status} ${text.slice(0, 200)}`.trim());
+    }
+  }
+
   /** Ids of what's in a collection. */
   async collectionItems(collectionId: string): Promise<string[]> {
     const userId = await this.getAdminUserId();

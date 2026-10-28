@@ -690,9 +690,17 @@ export class Engine {
       // Take over a collection that already has this name, rather than making a second.
       const existing = await jf.findCollection(name);
       const id = existing?.Id ?? (await jf.createCollection(name, itemIds));
-      this.db.prepare("UPDATE seasons SET collection_id = ? WHERE id = ?").run(id, season.id);
+      // A new collection needs the cover put on it again.
+      this.db.prepare("UPDATE seasons SET collection_id = ?, cover_applied = NULL WHERE id = ?").run(id, season.id);
+      season = { ...season, collection_id: id, cover_applied: null };
       col = existing ?? (await jf.getItem(id));
       logActivity(this.db, "season", `${existing ? "Using" : "Made"} the “${name}” collection in Jellyfin for ${season.name}`);
+    }
+    if (season.collection_generic && (!col.LockData || Object.values(col.ProviderIds ?? {}).some(Boolean))) {
+      const matched = Object.values(col.ProviderIds ?? {}).some(Boolean);
+      await jf.makeGeneric(col, { refresh: !this.cover(season.id) });
+      col = await jf.getItem(col.Id);
+      if (matched) logActivity(this.db, "season", `Unlinked the “${name}” collection from the online match Jellyfin gave it, and locked it`);
     }
     const inside = new Set(await jf.collectionItems(col.Id));
     const want = new Set(itemIds);
@@ -701,11 +709,42 @@ export class Engine {
     if (add.length) await jf.addToCollection(col.Id, add);
     if (remove.length) await jf.removeFromCollection(col.Id, remove);
     if (col.Name !== name) await jf.rename(col.Id, name);
+    await this.syncCover(jf, season, col);
     const who = new Set(active ? seasonPeople(season) : []);
     const tags = col.Tags ?? [];
     const addTags = people.filter((p) => who.has(p.id) && !hasTag(tags, p.tag)).map((p) => p.tag);
     const removeTags = people.filter((p) => !who.has(p.id) && hasTag(tags, p.tag)).map((p) => p.tag);
     if (addTags.length || removeTags.length) await jf.editTags(col.Id, addTags, removeTags);
+  }
+
+  cover(seasonId: number): { type: string; data: Uint8Array; version: number } | undefined {
+    return this.db.prepare("SELECT type, data, version FROM season_covers WHERE season_id = ?").get(seasonId) as
+      | { type: string; data: Uint8Array; version: number }
+      | undefined;
+  }
+
+  /**
+   * Puts the season's uploaded cover on its collection, again if something in
+   * Jellyfin replaced it; takes Tagarr's cover off once it's removed here.
+   */
+  private async syncCover(jf: Jellyfin, season: SeasonRow, col: { Id: string; ImageTags?: Record<string, string> } & Record<string, unknown>) {
+    const cover = this.cover(season.id);
+    const primaryTag = (col.ImageTags as Record<string, string> | undefined)?.Primary ?? "";
+    if (cover) {
+      if (season.cover_applied === `${cover.version}|${primaryTag}`) return;
+      await jf.uploadImage(col.Id, "Primary", cover.type, cover.data);
+      const after = await jf.getItem(col.Id);
+      const tag = (after.ImageTags as Record<string, string> | undefined)?.Primary ?? "";
+      this.db.prepare("UPDATE seasons SET cover_applied = ? WHERE id = ?").run(`${cover.version}|${tag}`, season.id);
+      return;
+    }
+    if (!season.cover_applied) return;
+    // Our cover is still up (the poster hasn't changed since): take it down.
+    if (season.cover_applied.endsWith(`|${primaryTag}`) && primaryTag) {
+      await jf.deleteImages(col as never, ["Primary"]);
+      if (season.collection_generic) await jf.refreshImages(col.Id);
+    }
+    this.db.prepare("UPDATE seasons SET cover_applied = NULL WHERE id = ?").run(season.id);
   }
 
   /**

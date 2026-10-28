@@ -176,6 +176,9 @@ The **Seasonal** page holds titles that should only show at a certain time, like
 - **Who sees it** while it's in season.
 - **The titles**: search for them in the season, or select them in the Library and choose **Add to season…**.
 - **A Jellyfin collection**, if you want one. Tagarr makes it (or takes over one with the same name), keeps exactly the season's titles in it, and tags it the same way they're tagged.
+- **A cover** for the collection, if you upload one (JPEG, PNG or WebP). Without one, Jellyfin draws a collage of the titles. If something in Jellyfin replaces the poster, Tagarr puts yours back.
+
+Jellyfin looks collections up online by name, so a "Halloween" collection would otherwise turn into the *Halloween* film series, with its poster and description. Tagarr unlinks its collections from any online match and locks them (**Don't match it online**, on by default). Turn that off only if the season really is a film series' collection.
 
 In season, each title is tagged for the season's people. Out of season it has nobody's tag, and so does the collection. A user limited to their own tags can't see an untagged item or an untagged collection, so the collection disappears instead of sitting there empty. Seasons switch on the minute, without waiting for the next sync, and the Activity page notes each start and end.
 
