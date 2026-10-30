@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Info, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { api, get, type AccessUser, type Person } from "@/lib/api";
+import { api, get, type AccessUser, type Person, type SettingsData } from "@/lib/api";
 import { PageHeader, useOverview } from "@/components/Layout";
 import { Avatar, PersonChip, usePeople } from "@/components/people";
 import { Badge, Button, Card, EmptyState, Modal, PageSpinner, cn } from "@/components/ui";
@@ -82,7 +82,10 @@ export default function AccessPage() {
                     ))}
                   </>
                 ) : (
-                  "Sees everything (no tag restriction)"
+                  <>
+                    Sees everything (no tag restriction)
+                    {person && !u.isAdmin && u.meantToSeeAll && <RemindAgain userId={u.id} />}
+                  </>
                 )}
                 {u.blockedTags.length > 0 && (
                   <div className="mt-1.5 text-xs text-muted-foreground">Blocked in Jellyfin: {u.blockedTags.join(", ")}</div>
@@ -125,6 +128,7 @@ function AccessModal({ user, people, onClose }: { user: AccessUser; people: Pers
     mutationFn: () => api("POST", `/access/${user.id}`, { allowedTags: restrict ? tags : [] }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["access"] });
+      qc.invalidateQueries({ queryKey: ["access-reminders"] });
       qc.invalidateQueries({ queryKey: ["activity"] });
       toast.success(`Updated ${user.name} in Jellyfin`);
       onClose();
@@ -190,4 +194,28 @@ function compareVersion(a: string, b: string) {
   const pb = b.split(".").map(Number);
   for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
   return 0;
+}
+
+/** Undoes "they're meant to see everything" from the Overview reminder. */
+function RemindAgain({ userId }: { userId: string }) {
+  const qc = useQueryClient();
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => get<SettingsData>("/settings") });
+  const undo = useMutation({
+    mutationFn: () =>
+      api("PUT", "/settings", { accessReminderDismissed: (settings.data?.accessReminderDismissed ?? []).filter((id) => id !== userId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["access"] });
+      qc.invalidateQueries({ queryKey: ["access-reminders"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+  return (
+    <span className="text-muted-foreground">
+      {" "}
+      · on purpose.{" "}
+      <button onClick={() => undo.mutate()} disabled={!settings.data || undo.isPending} className="font-medium text-primary hover:underline">
+        Remind me again
+      </button>
+    </span>
+  );
 }

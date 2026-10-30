@@ -149,6 +149,7 @@ export interface SettingsData {
   unrequestedPeople: number[];
   unrequestedGraceHours: number;
   ignoredSeerrUsers: number[];
+  accessReminderDismissed: string[];
   webhookPath: string;
   adminUsername: string;
   setupComplete: boolean;
@@ -198,6 +199,15 @@ export interface AccessUser {
   blockedTags: string[];
   visible: number;
   personId: number | null;
+  /** Dismissed from the "can still see everything" reminder. */
+  meantToSeeAll: boolean;
+}
+
+export interface AccessReminder {
+  userId: string;
+  userName: string;
+  personId: number;
+  personName: string;
 }
 
 export interface About {

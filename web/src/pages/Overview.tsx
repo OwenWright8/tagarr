@@ -1,4 +1,7 @@
 import { Link } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { EyeOff } from "lucide-react";
+import { api, get, type AccessReminder } from "@/lib/api";
 import { AlertTriangle, ArrowRight, CalendarRange, CircleDashed, Clock, Film, Inbox, Sparkles, Tag, Tags, Tv, UserX, Users } from "lucide-react";
 import { PageHeader, useOverview } from "@/components/Layout";
 import { Avatar } from "@/components/people";
@@ -26,6 +29,8 @@ export default function OverviewPage() {
           </>
         }
       />
+
+      <AccessReminderBanner />
 
       {!connections.seerr && (
         <Callout tone="info" icon={<Inbox className="h-4 w-4" />} to="/settings" action="Connect Seerr">
@@ -176,6 +181,42 @@ function Split({ icon, label, value, to, warn }: { icon: React.ReactNode; label:
       <span className="flex-1">{label}</span>
       <span className="font-medium tabular-nums">{value}</span>
     </Link>
+  );
+}
+
+/**
+ * Tagging hides nothing until a person's Jellyfin account is limited to their
+ * tag. Until then, say so (it's the step people miss after setup).
+ */
+function AccessReminderBanner() {
+  const qc = useQueryClient();
+  const reminders = useQuery({ queryKey: ["access-reminders"], queryFn: () => get<AccessReminder[]>("/access/reminders"), staleTime: 60_000 });
+  const dismiss = useMutation({
+    mutationFn: (userIds: string[]) => api("POST", "/access/reminders/dismiss", { userIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["access-reminders"] }),
+  });
+  const list = reminders.data ?? [];
+  if (!list.length) return null;
+  const names = list.map((r) => r.personName);
+  const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm sm:flex-row sm:items-center">
+      <span className="flex flex-1 items-start gap-2">
+        <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+        <span>
+          <strong className="font-semibold">{who}</strong> can still see everything in Jellyfin, including everyone else's titles. Tags only hide things once{" "}
+          {names.length === 1 ? "their account is" : "their accounts are"} set to see just their own.
+        </span>
+      </span>
+      <div className="flex shrink-0 items-center gap-4">
+        <button onClick={() => dismiss.mutate(list.map((r) => r.userId))} disabled={dismiss.isPending} className="text-muted-foreground hover:text-foreground">
+          They should see everything
+        </button>
+        <Link to="/access" className="font-medium text-primary hover:underline">
+          Set what they see →
+        </Link>
+      </div>
+    </div>
   );
 }
 

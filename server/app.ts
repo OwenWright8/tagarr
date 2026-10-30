@@ -845,6 +845,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       unrequestedPeople: s.unrequestedPeople,
       unrequestedGraceHours: s.unrequestedGraceHours,
       ignoredSeerrUsers: s.ignoredSeerrUsers,
+      accessReminderDismissed: s.accessReminderDismissed,
       webhookPath: `/api/webhook/${s.webhookSecret}`,
       adminUsername: s.adminUsername,
       setupComplete: s.setupComplete,
@@ -878,6 +879,9 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       const n = Number(body.unrequestedGraceHours);
       if (!Number.isFinite(n) || n < 0 || n > 24 * 365) return reply.code(400).send({ error: "Grace period must be 0 or more hours" });
       patch.unrequestedGraceHours = n;
+    }
+    if (Array.isArray(body.accessReminderDismissed)) {
+      patch.accessReminderDismissed = [...new Set(body.accessReminderDismissed.map(String))];
     }
     if (Array.isArray(body.ignoredSeerrUsers)) {
       patch.ignoredSeerrUsers = [...new Set(body.ignoredSeerrUsers.map(Number).filter(Number.isInteger))];
@@ -945,6 +949,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     try {
       const [users, info] = await Promise.all([jf.users(), jf.info()]);
       const people = listPeople(db);
+      const dismissed = new Set(getSettings(db).accessReminderDismissed);
       const items = db.prepare("SELECT tags FROM items").all() as { tags: string }[];
       const total = items.length;
       return {
@@ -966,12 +971,43 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
             blockedTags: blocked,
             visible,
             personId: people.find((p) => p.jellyfin_user_id === u.Id)?.id ?? null,
+            meantToSeeAll: dismissed.has(u.Id),
           };
         }),
       };
     } catch (err) {
       return reply.code(502).send({ error: errorText(err) });
     }
+  });
+
+  // People whose Jellyfin account still sees everything: tagging does nothing
+  // for them until they have a rule. Administrators are left out (they're
+  // usually meant to see it all), and so is anyone dismissed as "meant to".
+  app.get("/api/access/reminders", async () => {
+    const jf = engine.jellyfin();
+    if (!jf) return [];
+    let users;
+    try {
+      users = await jf.users();
+    } catch {
+      return []; // A hint, not an error: the Access page reports connection trouble.
+    }
+    const dismissed = new Set(getSettings(db).accessReminderDismissed);
+    const out: { userId: string; userName: string; personId: number; personName: string }[] = [];
+    for (const p of listPeople(db)) {
+      const u = users.find((x) => x.Id === p.jellyfin_user_id);
+      if (!u || u.Policy?.IsAdministrator || dismissed.has(u.Id) || out.some((o) => o.userId === u.Id)) continue;
+      if ((u.Policy?.AllowedTags ?? []).length || (u.Policy?.BlockedTags ?? []).length) continue;
+      out.push({ userId: u.Id, userName: u.Name, personId: p.id, personName: p.name });
+    }
+    return out;
+  });
+
+  app.post<{ Body: { userIds?: string[] } }>("/api/access/reminders/dismiss", async (req) => {
+    const ids = arrayOf(req.body?.userIds, "string");
+    const s = getSettings(db);
+    saveSettings(db, { accessReminderDismissed: [...new Set([...s.accessReminderDismissed, ...ids])] });
+    return { ok: true };
   });
 
   app.post<{ Params: { userId: string }; Body: { allowedTags?: string[] } }>("/api/access/:userId", async (req, reply) => {

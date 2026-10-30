@@ -445,3 +445,24 @@ test("a title replaced in Jellyfin (new id) stays in its season", async () => {
   assert.equal(season.missingCount, 0);
   await api("DELETE", `/api/seasons/${id}`);
 });
+
+test("people whose Jellyfin account still sees everything are pointed at Access", async () => {
+  const jamie = ((await api("GET", "/api/people")).json as { id: number; name: string }[]).find((p) => p.name === "Jamie")!;
+  await api("PATCH", `/api/people/${jamie.id}`, { jellyfinUserId: "u-jamie" });
+  // Owen's account is an administrator and Alex already has a rule: only Jamie.
+  let reminders = (await api("GET", "/api/access/reminders")).json;
+  assert.deepEqual(reminders.map((r: { personName: string; userId: string }) => [r.personName, r.userId]), [["Jamie", "u-jamie"]]);
+
+  // "That's on purpose" stops the reminder, and Access shows it can be undone.
+  await api("POST", "/api/access/reminders/dismiss", { userIds: ["u-jamie"] });
+  assert.deepEqual((await api("GET", "/api/access/reminders")).json, []);
+  const user = (await api("GET", "/api/access")).json.users.find((u: { id: string }) => u.id === "u-jamie");
+  assert.equal(user.meantToSeeAll, true);
+  await api("PUT", "/api/settings", { accessReminderDismissed: [] });
+  assert.equal((await api("GET", "/api/access/reminders")).json.length, 1);
+
+  // Giving them a rule is what really clears it.
+  await api("POST", "/api/access/u-jamie", { allowedTags: ["Kids"] });
+  reminders = (await api("GET", "/api/access/reminders")).json;
+  assert.deepEqual(reminders, []);
+});

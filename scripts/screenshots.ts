@@ -121,6 +121,8 @@ try {
     await step("overview", async () => {
       await p.goto(base);
       await p.getByText("Recent activity").waitFor();
+      // Nobody's access is set up yet: the Overview says so.
+      if (!dark) await p.getByText(/can still see everything in Jellyfin/).waitFor();
       await shot(p, `overview${suffix}`);
     });
     await step("library", async () => {

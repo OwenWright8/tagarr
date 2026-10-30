@@ -119,7 +119,8 @@ docker compose up -d
 | **Jellyfin** | Its address (e.g. `http://jellyfin:8096` or `http://192.168.1.10:8096`) and an API key from **Dashboard → API Keys → +**. |
 | **Seerr** | Its address and the API key from **Settings → General**. Optional, but it's what makes requests tag themselves. |
 | **People** | Your Seerr users are listed with their Jellyfin accounts already matched: click **Add** on each. Already using tags? Pick the existing tag for each person and everything already tagged is picked up as it is. |
-| **Finish** | Copy the webhook address it shows into Seerr (below), then **Finish and sync**. |
+| **Finish** | Copy the webhook address it shows into Seerr (below), then **Finish, then set up access**. |
+| **Access** | The step that actually hides things: click **Change** on each person's Jellyfin account and limit it to their tag ([details](#hiding-each-others-stuff)). Until you do, everyone still sees everything, and the Overview reminds you. |
 
 That's it. The first sync tags everything that's already been requested.
 

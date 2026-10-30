@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { api, get, type SettingsData } from "@/lib/api";
@@ -16,15 +17,17 @@ export default function SetupPage() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => get<SettingsData>("/settings") });
   const people = usePeople();
   const [step, setStep] = useState(0);
-  const [finishing, setFinishing] = useState(false);
+  const [finishing, setFinishing] = useState<"" | "sync" | "access">("");
+  const navigate = useNavigate();
 
   if (!settings.data) return <PageSpinner />;
   const s = settings.data;
 
-  const finish = async () => {
-    setFinishing(true);
+  const finish = async (then: "sync" | "access") => {
+    setFinishing(then);
     await api("PUT", "/settings", { setupComplete: true });
     await api("POST", "/sync").catch(() => {});
+    navigate(then === "access" ? "/access" : "/", { replace: true });
     await qc.invalidateQueries();
   };
 
@@ -110,10 +113,11 @@ export default function SetupPage() {
                   <WebhookHelp path={s.webhookPath} />
                 </div>
                 <div>
-                  <h3 className="mb-1.5 font-medium">2. Hide other people's items</h3>
+                  <h3 className="mb-1.5 font-medium">2. Hide other people's items (the important one)</h3>
                   <p className="text-muted-foreground">
-                    Once everything is tagged, the <strong>Access</strong> page sets each Jellyfin user to only see items with their tag. Anything you both request
-                    carries both tags, so it shows for both of you.
+                    Tags alone don't hide anything: each person's Jellyfin account has to be set to only see items with their tag. The <strong>Access</strong> page
+                    does that in one click per person. Anything you both request carries both tags, so it still shows for both of you. Admin accounts can keep
+                    seeing everything.
                   </p>
                 </div>
               </div>
@@ -121,9 +125,14 @@ export default function SetupPage() {
                 <Button variant="ghost" onClick={() => setStep(2)}>
                   <ArrowLeft className="h-4 w-4" /> Back
                 </Button>
-                <Button onClick={finish} loading={finishing}>
-                  Finish and sync <ArrowRight className="h-4 w-4" />
-                </Button>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                  <Button variant="outline" onClick={() => finish("sync")} loading={finishing === "sync"} disabled={!!finishing}>
+                    Finish and sync
+                  </Button>
+                  <Button onClick={() => finish("access")} loading={finishing === "access"} disabled={!!finishing}>
+                    Finish, then set up access <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </>
           )}

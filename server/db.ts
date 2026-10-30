@@ -235,6 +235,8 @@ export interface Settings {
   unrequestedGraceHours: number;
   /** Seerr users whose requests are never tagged (e.g. an admin who sees everything). */
   ignoredSeerrUsers: number[];
+  /** Jellyfin users who are meant to see everything, so aren't nagged about an access rule. */
+  accessReminderDismissed: string[];
   webhookSecret: string;
   adminUsername: string;
   adminPasswordHash: string;
@@ -254,6 +256,7 @@ export const DEFAULT_SETTINGS: Settings = {
   unrequestedPeople: [],
   unrequestedGraceHours: 24,
   ignoredSeerrUsers: [],
+  accessReminderDismissed: [],
   webhookSecret: "",
   adminUsername: "",
   adminPasswordHash: "",
