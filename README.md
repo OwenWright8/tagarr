@@ -38,6 +38,10 @@ Tagarr does the tagging for you.
 - **On your dashboard.** A [Homepage](https://gethomepage.dev) widget shows what's untagged, shared and waiting at a glance.
 - **Yours to run.** One small container, one volume, no accounts anywhere. Works on a Raspberry Pi.
 
+<p align="center">
+  <img src="docs/screenshots/tagging.gif" alt="Tagging in the Library: clicking Alex's and Owen's faces under an untagged show tags it for both, and the Untagged count drops" width="880" />
+</p>
+
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/overview-light.png" alt="The Overview page: untagged, shared, waiting and suggestion counts, each person's share of the library, and recent activity" /></td>
@@ -287,6 +291,8 @@ docker compose start
 
 ## Security notes
 
+Found a security problem? Please report it privately; see [SECURITY.md](SECURITY.md).
+
 - **The admin account is the only account.** It's separate from Jellyfin and Seerr, and sign-in attempts are rate limited per client address.
 - **API keys stay on the server.** They're stored in the data volume and never sent to the browser. Treat the volume like a `.env` file.
 - **Use HTTPS if it's reachable from outside your network.** The container speaks plain HTTP; put it behind your reverse proxy (Caddy, Traefik, nginx…) or keep it on your LAN / VPN. There's nothing to configure for a proxy.
@@ -329,6 +335,8 @@ npm run dev:mock   # fake Jellyfin on :8096 (key "jellyfin-key") and Seerr on :5
 npm run dev        # API on :8686, UI on http://localhost:5173
 npm test           # server + sync engine end to end against the fakes
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report bugs and send changes.
 
 `npm run build && npm run screenshots` walks through the setup wizard and every page in Chromium against the same fakes (run `npx playwright install chromium` once). With `SCREENSHOTS=1` it also regenerates `docs/screenshots/`.
 
