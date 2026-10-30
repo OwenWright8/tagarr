@@ -7,6 +7,7 @@ import { api, get, type About, type Library, type SettingsData } from "@/lib/api
 import { PageHeader } from "@/components/Layout";
 import { ConnectionForm } from "@/components/ConnectionForm";
 import { PeopleEditor } from "@/components/PeopleEditor";
+import { showUpdatePrompt, useAbout } from "@/components/UpdatePrompt";
 import { PersonChip, usePeople } from "@/components/people";
 import { Button, Card, CardBody, CardHeader, Field, Input, Modal, PageSpinner, Switch, cn, timeAgo } from "@/components/ui";
 
@@ -460,7 +461,17 @@ function AccountCard({ username }: { username: string }) {
 }
 
 function AboutCard() {
-  const about = useQuery({ queryKey: ["about"], queryFn: () => get<About>("/about") });
+  const about = useAbout();
+  const qc = useQueryClient();
+  const check = useMutation({
+    mutationFn: () => api<About>("POST", "/about/check"),
+    onSuccess: (data) => {
+      qc.setQueryData(["about"], data);
+      if (data.updateAvailable) showUpdatePrompt();
+      else toast.success(`You're up to date (${data.version})`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
   if (!about.data) return null;
   const a = about.data;
   return (
@@ -478,11 +489,17 @@ function AboutCard() {
                   : ""}
           </span>
         </div>
-        <div className="flex gap-4">
-          {a.updateAvailable && a.update.url && (
-            <a href={a.update.url} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+        <div className="flex flex-wrap items-center gap-4">
+          {a.updateAvailable ? (
+            <button onClick={showUpdatePrompt} className="font-medium text-primary hover:underline">
               What's new
-            </a>
+            </button>
+          ) : (
+            a.update.enabled && (
+              <button onClick={() => check.mutate()} disabled={check.isPending} className="font-medium text-primary hover:underline disabled:opacity-60">
+                {check.isPending ? "Checking…" : "Check for updates"}
+              </button>
+            )
           )}
           <a href={`https://github.com/${a.repo}`} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground">
             GitHub

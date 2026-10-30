@@ -43,6 +43,8 @@ export interface AppOptions {
   version: string;
   repo: string;
   updateCheck: boolean;
+  /** Where to ask for the latest release (tests point this at a fake GitHub). */
+  updateApiBase?: string;
   webRoot?: string;
   logger?: boolean;
 }
@@ -52,7 +54,7 @@ export const PERSON_COLORS = ["#7c5cbf", "#d9677e", "#3f8f84", "#d08a3a", "#4f7c
 export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance; engine: Engine; updates: UpdateChecker }> {
   const { db } = opts;
   const engine = new Engine(db);
-  const updates = new UpdateChecker(opts.updateCheck, opts.repo);
+  const updates = new UpdateChecker(opts.updateCheck, opts.repo, opts.updateApiBase);
   const limiter = new LoginLimiter();
 
   // Generated once, kept in the database: the webhook needs a secret URL.
@@ -144,12 +146,23 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     return { ok: true };
   });
 
-  app.get("/api/about", async () => ({
+  const about = () => ({
     version: opts.version,
     repo: opts.repo,
     update: updates.info,
     updateAvailable: isNewer(updates.info.latest, opts.version),
-  }));
+  });
+  app.get("/api/about", async () => about());
+
+  app.post("/api/about/check", async (_req, reply) => {
+    if (!updates.info.enabled) return reply.code(400).send({ error: "The update check is turned off (UPDATE_CHECK=off)" });
+    try {
+      if (!(await updates.checkNow())) return reply.code(502).send({ error: "GitHub didn't answer. Try again later." });
+    } catch (err) {
+      return reply.code(502).send({ error: `Couldn't reach GitHub: ${errorText(err)}` });
+    }
+    return about();
+  });
 
   // --- Webhook -------------------------------------------------------------------
   // Point Seerr's webhook agent (and optionally Jellyfin's webhook plugin) at

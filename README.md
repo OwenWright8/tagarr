@@ -274,7 +274,9 @@ docker compose pull && docker compose up -d
 
 The database migrates itself. Read the [release notes](https://github.com/OwenWright8/tagarr/releases) first: anything you need to do will be at the top.
 
-**How the check works.** Every 12 hours the container makes one anonymous request to GitHub's public API for the latest release. Nothing about your instance is sent, and browsers never contact GitHub themselves. `UPDATE_CHECK=off` stops it.
+**Tagarr tells you.** When a new release is out, Tagarr shows it once with its release notes and how to update, then keeps a small **Update available** link in the sidebar. **Remind me later** asks again in a few days; **Skip this version** stays quiet until the next one. **Settings → About → Check for updates** checks straight away.
+
+**How the check works.** Every 6 hours the container makes one anonymous request to GitHub's public API for the latest release. Nothing about your instance is sent, and browsers never contact GitHub themselves. `UPDATE_CHECK=off` stops it.
 
 ## Backups
 
@@ -301,9 +303,6 @@ Found a security problem? Please report it privately; see [SECURITY.md](SECURITY
 - **Hardened container.** It runs as an unprivileged user, and this repo's compose file also runs it with a read-only filesystem and `no-new-privileges`.
 
 ## FAQ
-
-**Coming from v0.1.0, when it was called Autotagarr?**<br/>
-Change the image to `ghcr.io/owenwright8/tagarr` and keep your existing volume mapped to `/data`. The database is renamed on first start, and you'll just need to sign in again.
 
 **I already tag things by hand. Will this mess them up?**<br/>
 No. When you add a person, pick their existing tag (the box suggests the tags already in your library). The first sync records everything that already has it. Tags that aren't people's tags are never touched.
@@ -342,7 +341,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report bugs and send changes.
 
 ### Releasing
 
-Push a tag like `v1.0.0`. The release workflow creates the GitHub Release with notes grouped by PR label (`feature`, `fix`, `breaking`…; see `.github/release.yml`) and publishes the image as `:v1.0.0`, `:1.0` and `:latest` for amd64 and arm64. Running instances notice within 12 hours.
+Push a tag like `v1.0.0`. The release workflow creates the GitHub Release with notes grouped by PR label (`feature`, `fix`, `breaking`…; see `.github/release.yml`) and publishes the image as `:v1.0.0`, `:1.0` and `:latest` for amd64 and arm64. The notes also list every commit since the last release, which is what the in-app update prompt shows. Running instances notice within 6 hours.
 
 ## License
 

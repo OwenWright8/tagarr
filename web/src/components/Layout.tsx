@@ -14,12 +14,12 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
-  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, get, type About, type Overview, type SyncStatus } from "@/lib/api";
+import { api, get, type Overview, type SyncStatus } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { cn, timeAgo } from "./ui";
+import { UpdateNotice, UpdatePrompt } from "./UpdatePrompt";
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
@@ -114,44 +114,6 @@ function ThemeButton() {
   );
 }
 
-function UpdateBanner() {
-  const about = useQuery({ queryKey: ["about"], queryFn: () => get<About>("/about"), staleTime: 3_600_000 });
-  const latest = about.data?.update.latest;
-  const key = `tagarr-dismissed-${latest}`;
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return !!localStorage.getItem(key);
-    } catch {
-      return false;
-    }
-  });
-  if (!about.data?.updateAvailable || dismissed || !latest) return null;
-  return (
-    <div className="flex items-center justify-center gap-3 border-b bg-primary-soft px-4 py-2 text-[13px] text-primary">
-      <span>
-        <strong className="font-semibold">Tagarr {latest}</strong> is available —{" "}
-        <a href={about.data.update.url ?? "#"} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">
-          What's new
-        </a>
-      </span>
-      <button
-        onClick={() => {
-          try {
-            localStorage.setItem(key, "1");
-          } catch {
-            // Not remembered, but hidden for now.
-          }
-          setDismissed(true);
-        }}
-        className="rounded p-0.5 hover:bg-primary/10"
-        aria-label="Dismiss"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
-
 export function Layout({ onSignOut }: { onSignOut: () => void }) {
   const overview = useOverview();
   const location = useLocation();
@@ -160,7 +122,7 @@ export function Layout({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <div className="min-h-screen">
-      <UpdateBanner />
+      <UpdatePrompt />
       <div className="flex">
         {/* Sidebar (desktop) */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card/60 px-3 py-4 lg:flex">
@@ -190,6 +152,7 @@ export function Layout({ onSignOut }: { onSignOut: () => void }) {
             ))}
           </nav>
           <div className="mt-auto space-y-1 border-t pt-3">
+            <UpdateNotice />
             <SyncButton />
             <div className="flex items-center justify-between px-1">
               <ThemeButton />
@@ -217,6 +180,7 @@ export function Layout({ onSignOut }: { onSignOut: () => void }) {
           </header>
 
           <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 lg:px-10 lg:pb-16 lg:pt-9">
+            <UpdateNotice className="mb-4 lg:hidden" />
             <Outlet />
           </main>
 

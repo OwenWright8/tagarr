@@ -80,3 +80,35 @@ test("season windows, yearly and one-off", async () => {
   assert.equal(checkWindow("2026-12-20T18:00", "2026-01-06T00:00", true), null);
   assert.equal(checkWindow("2026-02-30T00:00", "2026-03-01T00:00", true), "Pick when the season starts");
 });
+
+test("the update check keeps the release's notes, cleaned up", async () => {
+  const http = await import("node:http");
+  const { UpdateChecker } = await import("../server/update-check.ts");
+  let release: unknown = {
+    tag_name: "v9.1.0",
+    html_url: "https://github.com/x/y/releases/tag/v9.1.0",
+    published_at: "2026-10-30T00:00:00Z",
+    body: "<!-- generated -->\r\n## What's changed\r\n\r\n\r\n\r\n- Add seasonal titles\r\n- Fix a thing\r\n",
+  };
+  const server = http.createServer((req, res) => {
+    res.writeHead(req.url === "/repos/x/y/releases/latest" ? 200 : 404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(release));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  try {
+    const checker = new UpdateChecker(true, "x/y", base);
+    assert.equal(await checker.check(), true);
+    assert.equal(checker.info.latest, "v9.1.0");
+    assert.equal(checker.info.notes, "## What's changed\n\n- Add seasonal titles\n- Fix a thing");
+    assert.equal(checker.info.publishedAt, "2026-10-30T00:00:00Z");
+    // Anything that doesn't look like a GitHub release is ignored.
+    release = { tag_name: "v9.2.0", html_url: "https://evil.example/" };
+    assert.equal(await checker.check(), false);
+    assert.equal(checker.info.latest, "v9.1.0");
+    // Off means off.
+    assert.equal(await new UpdateChecker(false, "x/y", base).checkNow(), false);
+  } finally {
+    server.close();
+  }
+});

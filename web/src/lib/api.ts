@@ -203,6 +203,6 @@ export interface AccessUser {
 export interface About {
   version: string;
   repo: string;
-  update: { enabled: boolean; latest: string | null; url: string | null; checkedAt: number | null };
+  update: { enabled: boolean; latest: string | null; url: string | null; notes: string | null; publishedAt: string | null; checkedAt: number | null };
   updateAvailable: boolean;
 }

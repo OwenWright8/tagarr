@@ -43,10 +43,24 @@ jobs:
           fetch-depth: 0
           ref: ${{ env.RELEASE_TAG }}
 
+      # Changes often land straight on main rather than through PRs, which
+      # leaves the generated notes empty: list the commits since the last
+      # release too. The app's update prompt shows these notes.
+      - name: List changes since the last release
+        run: |
+          prev=$(git describe --tags --abbrev=0 --exclude='*-*' "$RELEASE_TAG^" 2>/dev/null || true)
+          {
+            echo "## What's changed"
+            echo
+            git log --no-merges --format='- %s' ${prev:+"$prev.."}"$RELEASE_TAG"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: true
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
 
