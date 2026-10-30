@@ -76,6 +76,8 @@ export interface Season {
   collectionGeneric: boolean;
   coverVersion: number | null;
   itemCount: number;
+  /** Titles in the season that aren't in Jellyfin right now (they rejoin when they're back). */
+  missingCount: number;
   /** The current window, or the next one. */
   status: { active: boolean; over: boolean; start: string; end: string };
   applied: boolean;

@@ -157,6 +157,32 @@ const MIGRATIONS: string[] = [
   );
   ALTER TABLE seasons ADD COLUMN cover_applied TEXT;
   `,
+  `
+  -- Season membership survives a title being replaced in Jellyfin (a new
+  -- file can mean a new Jellyfin id): each row keeps the title's online ids
+  -- so it can be found again, instead of being deleted with the old item.
+  CREATE TABLE season_items_v2 (
+    season_id INTEGER NOT NULL REFERENCES seasons (id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,             -- the Jellyfin item (the last one seen, while it's missing)
+    media_type TEXT,                   -- Movie | Series
+    tmdb_id TEXT,
+    tvdb_id TEXT,
+    PRIMARY KEY (season_id, item_id)
+  );
+  INSERT INTO season_items_v2 (season_id, item_id, media_type, tmdb_id, tvdb_id)
+    SELECT si.season_id, si.item_id, i.type, i.tmdb_id, i.tvdb_id
+    FROM season_items si LEFT JOIN items i ON i.id = si.item_id;
+  DROP TABLE season_items;
+  ALTER TABLE season_items_v2 RENAME TO season_items;
+  CREATE INDEX season_items_item ON season_items (item_id);
+
+  -- Titles that left every season and still need their usual tags put back
+  -- (kept until Jellyfin accepts the change, so an outage can't strand them).
+  CREATE TABLE season_releases (
+    item_id TEXT PRIMARY KEY,
+    since INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(file: string): DB {

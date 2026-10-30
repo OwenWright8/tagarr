@@ -184,6 +184,7 @@ export class Engine {
     };
     try {
       await this.refreshLibrary(jf, s, stats);
+      await this.processReleases();
       const people = listPeople(this.db);
       this.adoptExistingTags(people, stats);
       const seerr = this.seerr(s);
@@ -259,6 +260,7 @@ export class Engine {
       this.db.exec(
         "UPDATE requests SET item_id = NULL, applied = 0 WHERE item_id IS NOT NULL AND item_id NOT IN (SELECT id FROM items)",
       );
+      this.relinkSeasonItems();
     });
     stats.items = media.length;
   }
@@ -267,7 +269,10 @@ export class Engine {
     if (!people.length) return;
     // A season's tags come and go with it; they aren't anyone's to adopt.
     const items = this.db
-      .prepare("SELECT id, tags FROM items i WHERE NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)")
+      .prepare(
+        `SELECT id, tags FROM items i WHERE NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)
+         AND NOT EXISTS (SELECT 1 FROM season_releases r WHERE r.item_id = i.id)`,
+      )
       .all() as { id: string; tags: string }[];
     const assigned = this.assignedSet();
     const insert = this.db.prepare(
@@ -648,7 +653,11 @@ export class Engine {
       const active = st.active ? 1 : 0;
       if (season.applied_active === active) continue;
       this.db.prepare("UPDATE seasons SET applied_active = ? WHERE id = ?").run(active, season.id);
-      const n = (this.db.prepare("SELECT count(*) AS n FROM season_items WHERE season_id = ?").get(season.id) as { n: number }).n;
+      const n = (
+        this.db.prepare("SELECT count(*) AS n FROM season_items si JOIN items i ON i.id = si.item_id WHERE si.season_id = ?").get(season.id) as {
+          n: number;
+        }
+      ).n;
       const names = people.filter((p) => seasonPeople(season).includes(p.id)).map((p) => p.name);
       logActivity(
         this.db,
@@ -681,7 +690,9 @@ export class Engine {
    */
   private async syncCollection(jf: Jellyfin, season: SeasonRow, active: boolean, people: Person[]) {
     const itemIds = (
-      this.db.prepare("SELECT item_id FROM season_items WHERE season_id = ? ORDER BY item_id").all(season.id) as { item_id: string }[]
+      this.db
+        .prepare("SELECT si.item_id FROM season_items si JOIN items i ON i.id = si.item_id WHERE si.season_id = ? ORDER BY si.item_id")
+        .all(season.id) as { item_id: string }[]
     ).map((r) => r.item_id);
     const name = season.collection_name?.trim() || season.name;
     let col = season.collection_id ? await jf.getCollection(season.collection_id) : null;
@@ -747,27 +758,79 @@ export class Engine {
     this.db.prepare("UPDATE seasons SET cover_applied = NULL WHERE id = ?").run(season.id);
   }
 
-  /**
-   * Items that just left every season go back to who they belong to: their
-   * people tags are set to their assignments again.
-   */
+  /** Titles that left every season: their usual tags go back on, now and on every sync until that works. */
   async releaseItems(itemIds: string[]) {
+    const mark = this.db.prepare("INSERT OR IGNORE INTO season_releases (item_id, since) VALUES (?, ?)");
+    tx(this.db, () => {
+      for (const id of itemIds) mark.run(id, Date.now());
+    });
+    await this.processReleases();
+  }
+
+  /**
+   * Puts released titles back to who they belong to: their people tags are
+   * set to their assignments again. A title stays queued until Jellyfin takes
+   * the change; meanwhile its leftover season tags aren't adopted as owners.
+   */
+  private async processReleases() {
+    const pending = (this.db.prepare("SELECT item_id FROM season_releases").all() as { item_id: string }[]).map((r) => r.item_id);
+    if (!pending.length) return;
     const jf = this.jellyfin();
     if (!jf) return;
     const s = this.settings();
     const people = listPeople(this.db);
-    for (const id of itemIds) {
+    const done = this.db.prepare("DELETE FROM season_releases WHERE item_id = ?");
+    for (const id of pending) {
       const item = this.item(id);
-      if (!item || this.seasonsOf(id).length) continue;
+      // Gone from Jellyfin, or back in a season (which decides its tags now).
+      if (!item || this.seasonsOf(id).length) {
+        done.run(id);
+        continue;
+      }
       try {
         await this.setPeopleTags(jf, item, people, this.assignedPeople(id));
         if (s.tagChildren && item.type === "Series") {
           await this.copyTagsToChildren(jf, item, people);
           this.db.prepare("UPDATE items SET children_synced = coalesce(child_count, -1) WHERE id = ?").run(id);
         }
+        done.run(id);
       } catch (err) {
-        logActivity(this.db, "error", `Couldn't put ${item.name}'s tags back after it left a season: ${errorText(err)}`, { itemId: id });
+        logActivity(this.db, "error", `Couldn't put ${item.name}'s tags back after it left a season (will retry): ${errorText(err)}`, {
+          itemId: id,
+        });
       }
+    }
+  }
+
+  /**
+   * A title replaced in Jellyfin can come back with a new id: find it again
+   * by its TMDB (or, for shows, TVDB) id so it stays in its seasons. Runs
+   * inside the library refresh, after the items table is current.
+   */
+  private relinkSeasonItems() {
+    // Keep each row's online ids current while its item is around.
+    this.db.exec(`
+      UPDATE season_items SET
+        media_type = (SELECT type FROM items i WHERE i.id = season_items.item_id),
+        tmdb_id = (SELECT tmdb_id FROM items i WHERE i.id = season_items.item_id),
+        tvdb_id = (SELECT tvdb_id FROM items i WHERE i.id = season_items.item_id)
+      WHERE item_id IN (SELECT id FROM items)
+    `);
+    const stale = this.db
+      .prepare("SELECT season_id, item_id, media_type, tmdb_id, tvdb_id FROM season_items WHERE item_id NOT IN (SELECT id FROM items)")
+      .all() as { season_id: number; item_id: string; media_type: string | null; tmdb_id: string | null; tvdb_id: string | null }[];
+    for (const row of stale) {
+      if (!row.media_type) continue;
+      const found = this.matchRequest({
+        media_type: row.media_type === "Series" ? "tv" : "movie",
+        tmdb_id: row.tmdb_id,
+        tvdb_id: row.tvdb_id,
+        jellyfin_media_id: null,
+      });
+      if (!found) continue; // Not back (yet); it rejoins when it is.
+      const already = this.db.prepare("SELECT 1 FROM season_items WHERE season_id = ? AND item_id = ?").get(row.season_id, found);
+      if (already) this.db.prepare("DELETE FROM season_items WHERE season_id = ? AND item_id = ?").run(row.season_id, row.item_id);
+      else this.db.prepare("UPDATE season_items SET item_id = ? WHERE season_id = ? AND item_id = ?").run(found, row.season_id, row.item_id);
     }
   }
 

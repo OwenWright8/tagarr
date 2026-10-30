@@ -392,3 +392,56 @@ test("seasons show titles only in season, and keep a collection that hides with 
   assert.equal(collection(), undefined);
   assert.deepEqual([...tagsOf("Paddington 2")].sort(), before.paddington);
 });
+
+test("a title that leaves a season gets its tags back even if Jellyfin was down at the time", async () => {
+  const people = (await api("GET", "/api/people")).json as { id: number; name: string }[];
+  const owen = people.find((p) => p.name === "Owen")!;
+  const before = [...tagsOf("Coco")].sort();
+  assert.ok(!before.includes("Owen"));
+  const all = { start: "2020-01-01T00:00", end: "2020-12-31T23:59", yearly: true }; // in season nearly all year
+  const id = (await api("POST", "/api/seasons", { name: "Owen's", ...all, people: [owen.id], collection: false, itemIds: [idOf("Coco")] })).json.id;
+  await engine.sync("test");
+  // Dec 31 23:59 onwards is the one minute it's out of season.
+  if ((await api("GET", `/api/seasons/${id}`)).json.status.active) assert.deepEqual(tagsOf("Coco"), ["Owen"]);
+
+  mock.failEdits = true;
+  await api("DELETE", `/api/seasons/${id}`);
+  assert.ok(!tagsOf("Coco").includes("Alex")); // couldn't be put back yet
+  await engine.sync("test"); // still down: Owen's leftover season tag must not be adopted
+  const coco = (await api("GET", "/api/items?q=coco")).json.items[0];
+  assert.ok(!coco.people.some((p: { id: number }) => p.id === owen.id), JSON.stringify(coco.people));
+
+  mock.failEdits = false;
+  await engine.sync("test");
+  assert.deepEqual([...tagsOf("Coco")].sort(), before);
+});
+
+test("a title replaced in Jellyfin (new id) stays in its season", async () => {
+  const people = (await api("GET", "/api/people")).json as { id: number; name: string }[];
+  const alex = people.find((p) => p.name === "Alex")!;
+  const local = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const window = { start: local(new Date(Date.now() - 86_400_000)), end: local(new Date(Date.now() + 86_400_000)), yearly: false };
+  const oldId = idOf("Arrival");
+  const id = (await api("POST", "/api/seasons", { name: "Sci-fi week", ...window, people: [alex.id], itemIds: [oldId] })).json.id;
+  await engine.sync("test");
+  assert.deepEqual(tagsOf("Arrival"), ["Alex"]);
+
+  // Radarr swaps the file; Jellyfin drops the old item...
+  mock.items.delete(oldId);
+  await engine.sync("test");
+  let season = (await api("GET", "/api/seasons")).json.find((s: { id: number }) => s.id === id);
+  assert.equal(season.itemCount, 0);
+  assert.equal(season.missingCount, 1);
+  // ...and the new copy shows up under a new id, untagged.
+  const fresh = mock.addMovie("Arrival", 329865, 2016);
+  await engine.sync("test");
+  assert.notEqual(fresh.Id, oldId);
+  assert.deepEqual(mock.items.get(fresh.Id)!.Tags, ["Alex"]); // edits replace the mock item, so read it fresh
+  season = (await api("GET", `/api/seasons/${id}`)).json;
+  assert.deepEqual(season.items.map((i: { id: string }) => i.id), [fresh.Id]);
+  assert.equal(season.missingCount, 0);
+  await api("DELETE", `/api/seasons/${id}`);
+});

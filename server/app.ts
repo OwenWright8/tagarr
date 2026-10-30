@@ -188,7 +188,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
         `SELECT count(*) AS n FROM items i WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.item_id = i.id)
          AND NOT EXISTS (SELECT 1 FROM season_items s WHERE s.item_id = i.id)`,
       ),
-      seasonal: count("SELECT count(DISTINCT item_id) AS n FROM season_items"),
+      seasonal: count("SELECT count(DISTINCT si.item_id) AS n FROM season_items si JOIN items i ON i.id = si.item_id"),
       shared: count("SELECT count(*) AS n FROM (SELECT item_id FROM assignments GROUP BY item_id HAVING count(*) > 1)"),
       pendingRequests: count("SELECT count(*) AS n FROM requests WHERE item_id IS NULL AND status != ?", REQUEST_DECLINED),
       unmappedRequests: count(
@@ -495,7 +495,8 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
 
   function publicSeason(row: SeasonRow) {
     const st = seasonStatus(row);
-    const n = count("SELECT count(*) AS n FROM season_items WHERE season_id = ?", row.id);
+    const n = count("SELECT count(*) AS n FROM season_items si JOIN items i ON i.id = si.item_id WHERE si.season_id = ?", row.id);
+    const missing = count("SELECT count(*) AS n FROM season_items si WHERE si.season_id = ? AND si.item_id NOT IN (SELECT id FROM items)", row.id);
     return {
       id: row.id,
       name: row.name,
@@ -509,6 +510,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
       collectionGeneric: !!row.collection_generic,
       coverVersion: (db.prepare("SELECT version FROM season_covers WHERE season_id = ?").get(row.id) as { version: number } | undefined)?.version ?? null,
       itemCount: n,
+      missingCount: missing,
       status: { active: st.active, over: st.over, start: st.start.toISOString(), end: st.end.toISOString() },
       applied: row.applied_active === (st.active ? 1 : 0),
     };
@@ -555,12 +557,19 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     };
   }
 
-  /** Puts items that are now in no season back to their usual tags, then syncs. */
+  /** Puts items that are now in no season back to their usual tags (retried until it works), then syncs. */
   async function afterSeasonChange(released: string[], reason: string) {
     const free = released.filter((id) => engine.seasonsOf(id).length === 0);
     if (free.length) await engine.releaseItems(free);
     engine.poke(reason);
   }
+
+  /** Adds titles to a season, remembering their online ids so they can be found again. */
+  const addSeasonItem = () =>
+    db.prepare(
+      `INSERT OR IGNORE INTO season_items (season_id, item_id, media_type, tmdb_id, tvdb_id)
+       SELECT ?, id, type, tmdb_id, tvdb_id FROM items WHERE id = ?`,
+    );
 
   app.get("/api/seasons", async () => listSeasons(db).map(publicSeason));
 
@@ -588,7 +597,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
         )
         .run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, v.collection_generic, Date.now());
       const id = Number(res.lastInsertRowid);
-      const add = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) VALUES (?, ?)");
+      const add = addSeasonItem();
       for (const itemId of read.itemIds ?? []) add.run(id, itemId);
       return id;
     });
@@ -619,8 +628,9 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
          collection_generic = ?, collection_id = CASE WHEN ? THEN collection_id ELSE NULL END WHERE id = ?`,
       ).run(v.name, v.start_at, v.end_at, v.yearly, v.people, v.collection, v.collection_name, v.collection_generic, v.collection, row.id);
       if (read.itemIds) {
-        db.prepare("DELETE FROM season_items WHERE season_id = ?").run(row.id);
-        const add = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) VALUES (?, ?)");
+        // Titles missing from Jellyfin right now aren't in the list sent back; keep them.
+        db.prepare("DELETE FROM season_items WHERE season_id = ? AND item_id IN (SELECT id FROM items)").run(row.id);
+        const add = addSeasonItem();
         for (const itemId of read.itemIds) add.run(row.id, itemId);
       }
     });
@@ -637,7 +647,7 @@ export async function buildApp(opts: AppOptions): Promise<{ app: FastifyInstance
     const remove = arrayOf(req.body?.remove, "string").slice(0, 5000);
     let added = 0;
     tx(db, () => {
-      const ins = db.prepare("INSERT OR IGNORE INTO season_items (season_id, item_id) SELECT ?, id FROM items WHERE id = ?");
+      const ins = addSeasonItem();
       for (const id of add) added += Number(ins.run(row.id, id).changes);
       const del = db.prepare("DELETE FROM season_items WHERE season_id = ? AND item_id = ?");
       for (const id of remove) del.run(row.id, id);

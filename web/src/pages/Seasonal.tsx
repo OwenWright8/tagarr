@@ -121,6 +121,12 @@ export default function SeasonalPage() {
                       </span>
                       <span className="flex items-center gap-1.5 text-muted-foreground">
                         <Film className="h-3.5 w-3.5" /> {s.itemCount} title{s.itemCount === 1 ? "" : "s"}
+                        {s.missingCount > 0 && (
+                          <span title="Not in Jellyfin right now (being replaced or re-downloaded?). They rejoin the season when they're back.">
+                            {" "}
+                            (+{s.missingCount} not in Jellyfin)
+                          </span>
+                        )}
                       </span>
                       {s.collection && (
                         <span className="flex items-center gap-1.5 text-muted-foreground">

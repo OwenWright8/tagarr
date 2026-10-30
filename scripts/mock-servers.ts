@@ -114,6 +114,8 @@ export interface MockState {
   users: MockUser[];
   requests: typeof REQUESTS;
   edits: number;
+  /** While true, item edits fail like a Jellyfin that's down or restarting. */
+  failEdits: boolean;
   addMovie(name: string, tmdb: number, year: number): MockItem;
   close(): Promise<void>;
   jellyfinUrl: string;
@@ -174,6 +176,7 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
     users,
     requests: REQUESTS,
     edits: 0,
+    failEdits: false,
     jellyfinUrl: "",
     seerrUrl: "",
     addMovie(name, tmdb, year) {
@@ -299,6 +302,7 @@ export async function startMocks(opts: { jellyfinPort?: number; seerrPort?: numb
         return send(204);
       }
       if (req.method === "POST") {
+        if (state.failEdits) return send(503, "Service Unavailable", "text/plain");
         const next = JSON.parse(body) as MockItem;
         // Real Jellyfin can't read TrickplayInfoDto back and answers 500.
         if ("Trickplay" in next) return send(500, "Error processing request.", "text/plain");
